@@ -59,7 +59,7 @@ class zynthian_gui_admin(zynthian_gui_selector):
 		self.child_pid=None
 		self.last_action=None
 		super().__init__('Action', True)
-		self.default_qmidinet()
+		#self.default_qmidinet()
     
 	def fill_list(self):
 		self.list_data=[]

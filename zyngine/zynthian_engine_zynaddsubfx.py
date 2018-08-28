@@ -100,9 +100,9 @@ class zynthian_engine_zynaddsubfx(zynthian_engine):
 		self.osc_target_port=6693
 	
 		if self.config_remote_display():
-			self.command=("/usr/local/bin/zynaddsubfx", "-O", "jack", "-I", "jack", "-P", str(self.osc_target_port), "-a")
+			self.command=("/usr/bin/zynaddsubfx", "-O", "jack", "-I", "jack", "-P", str(self.osc_target_port), "-a")
 		else:
-			self.command=("/usr/local/bin/zynaddsubfx", "-O", "jack", "-I", "jack", "-P", str(self.osc_target_port), "-a", "-U")
+			self.command=("/usr/bin/zynaddsubfx", "-O", "jack", "-I", "jack", "-P", str(self.osc_target_port), "-a", "-U")
 
 		self.conf_dir=self.data_dir + "/zynconf"
 		self.bank_dirs=[

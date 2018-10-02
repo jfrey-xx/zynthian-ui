@@ -125,9 +125,9 @@ class zynthian_engine_jalv(zynthian_engine):
 		self.plugin_url = self.plugins_dict[plugin_name]
 
 		if self.config_remote_display():
-			self.command = ("/usr/local/bin/jalv {}".format(self.plugin_url))		#TODO => Is possible to run plugins UI?
+			self.command = ("/usr/bin/jalv {}".format(self.plugin_url))		#TODO => Is possible to run plugins UI?
 		else:
-			self.command = ("/usr/local/bin/jalv {}".format(self.plugin_url))
+			self.command = ("/usr/bin/jalv {}".format(self.plugin_url))
 
 		self.learned_cc = [[None for c in range(128)] for chan in range(16)]
 		self.learned_zctrls = {}

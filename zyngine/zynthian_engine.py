@@ -84,8 +84,9 @@ class zynthian_engine:
 	def __init__(self, zyngui=None):
 		self.zyngui=zyngui
 
-		self.name=""
-		self.nickname=""
+		self.name = ""
+		self.nickname = ""
+		self.jackname = ""
 
 		self.loading=0
 		self.layers=[]
@@ -102,6 +103,14 @@ class zynthian_engine:
 		self.osc_server=None
 		self.osc_server_port=None
 		self.osc_server_url=None
+
+		self.audio_out = "sys"
+		self.options= {
+			'clone': True,
+			'transpose': True,
+			'audio_route': True,
+			'midi_chan': True
+		}
 
 	def __del__(self):
 		self.stop()
@@ -191,8 +200,8 @@ class zynthian_engine:
 	def start(self, start_queue=False, shell=False):
 		if not self.proc:
 			logging.info("Starting Engine " + self.name)
+			self.start_loading()
 			try:
-				self.start_loading()
 				self.proc=Popen(self.command, shell=shell, stdin=PIPE, stdout=PIPE, stderr=STDOUT, universal_newlines=True, env=self.command_env)
 					#, bufsize=1
 					#, preexec_fn=os.setsid
@@ -360,6 +369,15 @@ class zynthian_engine:
 	def set_midi_chan(self, layer):
 		pass
 
+	def get_active_midi_channels(self):
+		chans=[]
+		for layer in self.layers:
+			if layer.midi_chan is None:
+				return None
+			elif layer.midi_chan>=0 and layer.midi_chan<=15:
+				chans.append(layer.midi_chan)
+		return chans
+
 	# ---------------------------------------------------------------------------
 	# Bank Management
 	# ---------------------------------------------------------------------------
@@ -375,7 +393,7 @@ class zynthian_engine:
 	# ---------------------------------------------------------------------------
 
 	def get_preset_list(self, bank):
-		logging.info('Getting Preset List for %s: NOT IMPLEMENTED!' % self.name)
+		logging.info('Getting Preset List for %s: NOT IMPLEMENTED!' % self.name),'PD'
 
 	def set_preset(self, layer, preset, preload=False):
 		if isinstance(preset[1],int):
@@ -399,47 +417,48 @@ class zynthian_engine:
 		midich=layer.get_midi_chan()
 		zctrls=OrderedDict()
 
-		for ctrl in self._ctrls:
-			options={}
+		if self._ctrls is not None:
+			for ctrl in self._ctrls:
+				options={}
 
-			#OSC control =>
-			if isinstance(ctrl[1],str):
-				#replace variables ...
-				tpl=Template(ctrl[1])
-				cc=tpl.safe_substitute(ch=midich)
-				try:
-					cc=tpl.safe_substitute(i=layer.part_i)
-				except:
-					pass
-				#set osc_port option ...
-				if self.osc_target_port>0:
-					options['osc_port']=self.osc_target_port
-				#debug message
-				logging.debug('CONTROLLER %s OSC PATH => %s' % (ctrl[0],cc))
-			#MIDI Control =>
-			else:
-				cc=ctrl[1]
+				#OSC control =>
+				if isinstance(ctrl[1],str):
+					#replace variables ...
+					tpl=Template(ctrl[1])
+					cc=tpl.safe_substitute(ch=midich)
+					try:
+						cc=tpl.safe_substitute(i=layer.part_i)
+					except:
+						pass
+					#set osc_port option ...
+					if self.osc_target_port>0:
+						options['osc_port']=self.osc_target_port
+					#debug message
+					logging.debug('CONTROLLER %s OSC PATH => %s' % (ctrl[0],cc))
+				#MIDI Control =>
+				else:
+					cc=ctrl[1]
 
-			#Build controller depending on array length ...
-			if len(ctrl)>4:
-				if isinstance(ctrl[4],str):
-					zctrl=zynthian_controller(self,ctrl[4],ctrl[0])
+				#Build controller depending on array length ...
+				if len(ctrl)>4:
+					if isinstance(ctrl[4],str):
+						zctrl=zynthian_controller(self,ctrl[4],ctrl[0])
+					else:
+						zctrl=zynthian_controller(self,ctrl[0])
+						zctrl.graph_path=ctrl[4]
+					zctrl.setup_controller(midich,cc,ctrl[2],ctrl[3])
+				elif len(ctrl)>3:
+					zctrl=zynthian_controller(self,ctrl[0])
+					zctrl.setup_controller(midich,cc,ctrl[2],ctrl[3])
 				else:
 					zctrl=zynthian_controller(self,ctrl[0])
-					zctrl.graph_path=ctrl[4]
-				zctrl.setup_controller(midich,cc,ctrl[2],ctrl[3])
-			elif len(ctrl)>3:
-				zctrl=zynthian_controller(self,ctrl[0])
-				zctrl.setup_controller(midich,cc,ctrl[2],ctrl[3])
-			else:
-				zctrl=zynthian_controller(self,ctrl[0])
-				zctrl.setup_controller(midich,cc,ctrl[2])
+					zctrl.setup_controller(midich,cc,ctrl[2])
 
-			#Set controller extra options
-			if len(options)>0:
-				zctrl.set_options(options)
+				#Set controller extra options
+				if len(options)>0:
+					zctrl.set_options(options)
 
-			zctrls[ctrl[0]]=zctrl
+				zctrls[ctrl[0]]=zctrl
 		return zctrls
 
 	def send_controller_value(self, zctrl):
@@ -451,5 +470,15 @@ class zynthian_engine:
 
 	def get_path(self, layer):
 		return self.nickname
+
+	# ---------------------------------------------------------------------------
+	# Options
+	# ---------------------------------------------------------------------------
+
+	def set_audio_out(self, jackname):
+		self.audio_out=jackname
+
+	def get_options(self):
+		return self.options
 
 #******************************************************************************

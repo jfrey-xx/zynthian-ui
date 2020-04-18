@@ -73,7 +73,9 @@ class zynthian_gui_engine(zynthian_gui_selector):
 			self.engine_info['JV/{}'.format(plugin_name)]=(plugin_name, "{} - Plugin LV2".format(plugin_name))
 
 		self.engine_info['PD']=("PureData","PureData - Visual Programming")
-		self.engine_info['MD']=("MOD-UI","MOD-UI - Plugin Host")
+		self.engine_info['MD']=("MOD-UI","MOD-UI - Plugin Host")	
+		self.engine_info['MG']=("MidiGlue","MidiGlue - Select MIDI banks")
+
 
 
 	def fill_list(self):

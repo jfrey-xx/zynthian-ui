@@ -84,7 +84,7 @@ class zynthian_gui_engine(zynthian_gui_selector):
 		self.list_data=[]
 		i=0
 		for en in self.engine_info:
-			if en not in ["BF", "MD", "PT", "PD", "AE"] or en not in self.zyngines:
+			if en not in ["BF", "MD", "PT", "PD", "AE", "MG"] or en not in self.zyngines:
 				ei=self.engine_info[en]
 				self.list_data.append((en,i,ei[1],ei[0]))
 				i=i+1
@@ -114,6 +114,8 @@ class zynthian_gui_engine(zynthian_gui_selector):
 				self.zyngines[eng]=zynthian_engine_puredata(zynthian_gui_config.zyngui)
 			elif eng=="AE":
 				self.zyngines[eng]=zynthian_engine_aeolus(zynthian_gui_config.zyngui)
+			elif eng=="MG":
+				self.zyngines[eng]=zynthian_engine_midiglue(zynthian_gui_config.zyngui)
 			elif eng[0:3]=="JV/":
 				plugin_name=self.engine_info[eng][0]
 				eng="JV/{}".format(len(self.zyngines))

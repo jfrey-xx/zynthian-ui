@@ -48,10 +48,10 @@ class zynthian_engine_midiglue(zynthian_engine):
         #]
 
         #self.base_command=("/usr/bin/pd", "-jack", "-rt", "-alsamidi", "-mididev", "1", "-send", ";pd dsp 1")       
-        self.base_command=("/bin/echo", "youou")
+        self.command=("/usr/bin/xev", "-rv")
 
 
-
+        self.start()
         self.reset()
 
     # ---------------------------------------------------------------------------
@@ -72,13 +72,28 @@ class zynthian_engine_midiglue(zynthian_engine):
     def get_bank_list(self, layer=None):
         return self.bank_list
 
-    def set_bank(self, layer, bank):
-        pass
+    #def set_bank(self, layer, bank):
+    #    print("Should set bank")
+    #   pass
 
 
     #----------------------------------------------------------------------------
     # Preset Managament
     #----------------------------------------------------------------------------
+
+    def get_preset_list(self, bank):
+        print('Getting Preset List for from bank:')
+        print(bank)
+        # hacking something just for debug now
+        preset_list=[]
+        for i in range(0, 10):
+            path = ""
+            bank_msb = i
+            bank_lsb = 10+i
+            prg = 20+i
+            preset_list.append((path,[bank_msb,bank_lsb,prg],"preset" + str(i), i))
+        print(preset_list)
+        return preset_list
 
    
 

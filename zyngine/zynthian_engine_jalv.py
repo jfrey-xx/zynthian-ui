@@ -23,11 +23,8 @@
 #******************************************************************************
 
 import os
-import re
 import json
 import logging
-import pexpect
-from time import sleep
 from os.path import isfile
 from collections import OrderedDict
 
@@ -55,15 +52,17 @@ class zynthian_engine_jalv(zynthian_engine):
 	JALV_LV2_CONFIG_FILE = "{}/jalv_plugins.json".format(os.environ.get('ZYNTHIAN_CONFIG_DIR','/zynthian/config'))
 
 	plugins_dict = OrderedDict([
-		("Dexed", "https://github.com/dcoredump/dexed.lv2"),
-		("Helm", "http://tytel.org/helm"),
-		("MDA ePiano", "http://moddevices.com/plugins/mda/EPiano"),
-		("MDA Piano", "http://moddevices.com/plugins/mda/Piano"),
-		("MDA JX10", "http://moddevices.com/plugins/mda/JX10"),
-		("MDA DX10", "http://moddevices.com/plugins/mda/DX10"),
-		("OBXD", " https://obxd.wordpress.com"),
-		("SynthV1", "http://synthv1.sourceforge.net/lv2"),
-		("Noize Mak3r", "http://kunz.corrupt.ch/products/tal-noisemaker")
+		("Dexed", {'TYPE': "MIDI Synth",'URL': "https://github.com/dcoredump/dexed.lv2"}),
+		("Helm", {'TYPE': "MIDI Synth",'URL': "http://tytel.org/helm"}),
+		("MDA ePiano", {'TYPE': "MIDI Synth",'URL': "http://moddevices.com/plugins/mda/EPiano"}),
+		("MDA Piano", {'TYPE': "MIDI Synth",'URL': "http://moddevices.com/plugins/mda/Piano"}),
+		("MDA JX10", {'TYPE': "MIDI Synth",'URL': "http://moddevices.com/plugins/mda/JX10"}),
+		("MDA DX10", {'TYPE': "MIDI Synth",'URL': "http://moddevices.com/plugins/mda/DX10"}),
+		("OBXD", {'TYPE': "MIDI Synth",'URL': "https://obxd.wordpress.com"}),
+		("SynthV1", {'TYPE': "MIDI Synth",'URL': "http://synthv1.sourceforge.net/lv2"}),
+		("Noize Mak3r", {'TYPE': "MIDI Synth",'URL': "http://kunz.corrupt.ch/products/tal-noisemaker"}),
+		("Triceratops", {'TYPE': "MIDI Synth",'URL': "http://nickbailey.co.nr/triceratops"}),
+		("Raffo MiniMoog", {'TYPE': "MIDI Synth",'URL': "http://example.org/raffo"})
 	])
 
 	# ---------------------------------------------------------------------------
@@ -84,6 +83,11 @@ class zynthian_engine_jalv(zynthian_engine):
 			"ctrl_screens": [['MIDI Controllers',['volume','mod-wheel','sustain on/off']]]
 		},
 		"MDA JX10": {
+			"ctrls": [
+				['volume',7,96],
+				['mod-wheel',1,0],
+			],
+			"ctrl_screens": [['MIDI Controllers',['volume','mod-wheel']]]
 		},
 		"MDA ePiano": {
 			"ctrls": [
@@ -112,26 +116,31 @@ class zynthian_engine_jalv(zynthian_engine):
 	_ctrls=None
 	_ctrl_screens=None
 
+
 	#----------------------------------------------------------------------------
 	# Initialization
 	#----------------------------------------------------------------------------
 
-	def __init__(self, plugin_name, zyngui=None):
+
+	def __init__(self, plugin_name, plugin_type, zyngui=None):
 		super().__init__(zyngui)
+
+		self.type = plugin_type
 		self.name = "Jalv/" + plugin_name
 		self.nickname = "JV/" + plugin_name
 
 		self.plugin_name = plugin_name
-		self.plugin_url = self.plugins_dict[plugin_name]
+		self.plugin_url = self.plugins_dict[plugin_name]['URL']
 
 		if self.config_remote_display():
 			self.command = ("/usr/bin/jalv {}".format(self.plugin_url))		#TODO => Is possible to run plugins UI?
 		else:
 			self.command = ("/usr/bin/jalv {}".format(self.plugin_url))
 
+		self.command_prompt = "\n> "
+
 		self.learned_cc = [[None for c in range(128)] for chan in range(16)]
 		self.learned_zctrls = {}
-		self.current_learning_zctrl = None
 
 		output = self.start()
 
@@ -152,7 +161,7 @@ class zynthian_engine_jalv(zynthian_engine):
 			self._ctrls = self.plugin_ctrl_info[self.plugin_name]['ctrls']
 			self._ctrl_screens = self.plugin_ctrl_info[self.plugin_name]['ctrl_screens']
 		except:
-			logging.info("No defined MIDI controllers for '{}'.")
+			logging.info("No defined MIDI controllers for '{}'.".format(self.plugin_name))
 
 		# Generate LV2-Plugin Controllers
 		self.lv2_zctrl_dict = self.get_lv2_controllers_dict()
@@ -165,74 +174,42 @@ class zynthian_engine_jalv(zynthian_engine):
 
 
 	# ---------------------------------------------------------------------------
-	# Subproccess Management & IPC
-	# ---------------------------------------------------------------------------
-
-	def proc_get_output(self):
-		self.proc.expect('\n> ')
-		return self.proc.before.decode()
-
-	def start(self):
-		if not self.proc:
-			logging.info("Starting Engine " + self.name)
-			try:
-				self.start_loading()
-				self.proc=pexpect.spawn(self.command)
-				#self.proc.delaybeforesend = None
-				output=self.proc_get_output()
-				self.stop_loading()
-				return output
-			except Exception as err:
-				logging.error("Can't start engine %s => %s" % (self.name,err))
-
-	def stop(self, wait=0.2):
-		if self.proc:
-			self.start_loading()
-			try:
-				logging.info("Stoping Engine " + self.name)
-				self.proc.terminate()
-				if wait>0: sleep(wait)
-				self.proc.terminate(True)
-			except Exception as err:
-				logging.error("Can't stop engine %s => %s" % (self.name,err))
-			self.proc=None
-			self.stop_loading()
-
-	def proc_cmd(self, cmd):
-		if self.proc:
-			try:
-				#logging.debug("proc command: "+cmd)
-				self.proc.sendline(cmd)
-				out=self.proc_get_output()
-				logging.debug("proc output:\n%s" % (out))
-			except Exception as err:
-				out=""
-				logging.error("Can't exec engine command: %s => %s" % (cmd,err))
-			return out
-
-
-	# ---------------------------------------------------------------------------
 	# Layer Management
 	# ---------------------------------------------------------------------------
+
+	def add_layer(self, layer):
+		layer.listen_midi_cc = False
+		super().add_layer(layer)
+		self.set_midi_chan(layer)
+
 
 	# ---------------------------------------------------------------------------
 	# MIDI Channel Management
 	# ---------------------------------------------------------------------------
 
+
+	def set_midi_chan(self, layer):
+		if self.plugin_name=="Triceratops":
+			self.lv2_zctrl_dict["midi_channel"].set_value(layer.midi_chan+1.5)
+
+
 	#----------------------------------------------------------------------------
 	# Bank Managament
 	#----------------------------------------------------------------------------
 
+
 	def get_bank_list(self, layer=None):
 		return [("", None, "", None)]
 
+
 	def set_bank(self, layer, bank):
-		pass
+		return True
 
 
 	#----------------------------------------------------------------------------
 	# Preset Managament
 	#----------------------------------------------------------------------------
+
 
 	def _get_preset_list(self):
 		self.start_loading()
@@ -251,12 +228,12 @@ class zynthian_engine_jalv(zynthian_engine):
 		self.stop_loading()
 		return preset_list
 
+
 	def get_preset_list(self, bank):
 		return self.preset_list
 
+
 	def set_preset(self, layer, preset, preload=False):
-		self.start_loading()
-		
 		output=self.proc_cmd("\set_preset {}".format(preset[0]))
 
 		#Parse new controller values
@@ -268,17 +245,23 @@ class zynthian_engine_jalv(zynthian_engine):
 			except Exception as e:
 				logging.error(e)
 
-		self.stop_loading()
+		return True
+
 
 	def cmp_presets(self, preset1, preset2):
-		if preset1[0]==preset2[0]:
-			return True
-		else:
+		try:
+			if preset1[0]==preset2[0]:
+				return True
+			else:
+				return False
+		except:
 			return False
+
 
 	#----------------------------------------------------------------------------
 	# Controllers Managament
 	#----------------------------------------------------------------------------
+
 
 	def get_lv2_controllers_dict(self):
 		self.start_loading()
@@ -289,9 +272,9 @@ class zynthian_engine_jalv(zynthian_engine):
 			parts=line.split(" => ")
 			if len(parts)==2:
 				symbol=parts[0]
-				info=json.JSONDecoder().decode(parts[1])
-
 				try:
+					info=json.JSONDecoder().decode(parts[1])
+
 					#If there is points info ...
 					if len(info['points'])>1:
 						labels=[]
@@ -309,7 +292,9 @@ class zynthian_engine_jalv(zynthian_engine):
 							'labels': labels,
 							'ticks': values,
 							'value_min': values[0],
-							'value_max': values[-1]
+							'value_max': values[-1],
+							'is_toggle': info['is_toggle'],
+							'is_integer': info['is_integer']
 						})
 
 					#If it's a normal controller ...
@@ -336,6 +321,7 @@ class zynthian_engine_jalv(zynthian_engine):
 									'value_default': int(info['default']),
 									'value_min': int(info['min']),
 									'value_max': int(info['max']),
+									'is_toggle': False,
 									'is_integer': True
 								})
 						else:
@@ -345,17 +331,13 @@ class zynthian_engine_jalv(zynthian_engine):
 									'value_default': info['default'],
 									'value_min': info['min'],
 									'value_max': info['max'],
+									'is_toggle': False,
+									'is_integer': False
 								})
 
-				#If there is no range info (should be!!) => Default MIDI CC controller with 0-127 range
-				except:
-					zctrls[symbol]=zynthian_controller(self,symbol,info['label'],{
-						'graph_path': info['index'],
-						'value': 0,
-						'value_default': 0,
-						'value_min': 0,
-						'value_max': 127
-					})
+				#If control info is not OK
+				except Exception as e:
+					logging.error(e)
 
 		self.stop_loading()
 		return zctrls
@@ -375,8 +357,8 @@ class zynthian_engine_jalv(zynthian_engine):
 				#logging.debug("CTRL {}".format(symbol))
 				ctrl_set.append(symbol)
 				if len(ctrl_set)>=4:
-					#logging.debug("ADDING CONTROLLER SCREEN #"+str(c))
-					self._ctrl_screens.append(['Controllers#'+str(c),ctrl_set])
+					#logging.debug("ADDING CONTROLLER SCREEN {}#{}".format(self.plugin_name,c))
+					self._ctrl_screens.append(["{}#{}".format(self.plugin_name,c),ctrl_set])
 					ctrl_set=[]
 					c=c+1
 			except Exception as err:
@@ -384,7 +366,7 @@ class zynthian_engine_jalv(zynthian_engine):
 
 		if len(ctrl_set)>=1:
 			#logging.debug("ADDING CONTROLLER SCREEN #"+str(c))
-			self._ctrl_screens.append(['Controllers#'+str(c),ctrl_set])
+			self._ctrl_screens.append(["{}#{}".format(self.plugin_name,c),ctrl_set])
 
 
 	def get_controllers_dict(self, layer):
@@ -398,15 +380,15 @@ class zynthian_engine_jalv(zynthian_engine):
 	def send_controller_value(self, zctrl):
 		self.proc_cmd("\set_control %d, %.6f" % (zctrl.graph_path, zctrl.value))
 
+
 	#----------------------------------------------------------------------------
 	# MIDI learning
 	#----------------------------------------------------------------------------
 
-	def midi_learn(self, zctrl):
+
+	def init_midi_learn(self, zctrl):
 		if zctrl.graph_path:
-			# Set current learning zctrl
 			logging.info("Learning '{}' ({}) ...".format(zctrl.symbol,zctrl.graph_path))
-			self.current_learning_zctrl = zctrl
 
 
 	def midi_unlearn(self, zctrl):
@@ -415,60 +397,47 @@ class zynthian_engine_jalv(zynthian_engine):
 			try:
 				self.learned_cc[zctrl.midi_learn_chan][zctrl.midi_learn_cc] = None
 				del self.learned_zctrls[zctrl.graph_path]
-				return True
+				return zctrl._unset_midi_learn()
 			except Exception as e:
-				logging.warning("Can't Unlearn => {}".format(e))
+				logging.warning("Can't unlearn => {}".format(e))
 
 
-	def set_midi_learn(self, zctrl):
+	def set_midi_learn(self, zctrl ,chan, cc):
 		try:
-			if zctrl.graph_path and zctrl.midi_learn_chan is not None and zctrl.midi_learn_cc is not None:
-				logging.info("Learned '%s' => %d, %d" % (zctrl.symbol, zctrl.midi_learn_chan, zctrl.midi_learn_cc))
-				# Clean current binding if any ...
-				try:
-					self.learned_cc[zctrl.midi_learn_chan][zctrl.midi_learn_cc].midi_unlearn()
-				except:
-					pass
-				# Add midi learning info
-				self.learned_zctrls[zctrl.graph_path] = zctrl
-				self.learned_cc[zctrl.midi_learn_chan][zctrl.midi_learn_cc] = zctrl
-				# Clean current learning zctrl
-				self.current_learning_zctrl = None
+			# Clean current binding if any ...
+			try:
+				self.learned_cc[chan][cc].midi_unlearn()
+			except:
+				pass
+			# Add midi learning info
+			self.learned_zctrls[zctrl.graph_path] = zctrl
+			self.learned_cc[chan][cc] = zctrl
+			return zctrl._set_midi_learn(chan, cc)
 		except Exception as e:
-			logging.error("Can't learn %s => %s" % (zctrl.graph_path, e))
+			logging.error("Can't learn {} => {}".format(zctrl.symbol, e))
 
 
 	def reset_midi_learn(self):
 		logging.info("Reset MIDI-learn ...")
-		self.current_learning_zctrl = None
 		self.learned_zctrls = {}
 		self.learned_cc = [[None for chan in range(16)] for cc in range(128)]
 
 
+	def cb_midi_learn(self, zctrl, chan, cc):
+		return self.set_midi_learn(zctrl, chan, cc)
+
+
+	#----------------------------------------------------------------------------
+	# MIDI CC processing
+	#----------------------------------------------------------------------------
+
+
 	def midi_control_change(self, chan, ccnum, val):
-		if self.current_learning_zctrl:
-			self.current_learning_zctrl.set_midi_learn(chan, ccnum)
-		else:
-			try:
-				self.learned_cc[chan][ccnum].midi_control_change(val)
-			except:
-				pass
+		try:
+			self.learned_cc[chan][ccnum].midi_control_change(val)
+		except:
+			pass
 
-
-
-	#--------------------------------------------------------------------------
-	# Special
-	#--------------------------------------------------------------------------
-
-	# ---------------------------------------------------------------------------
-	# Layer "Path" String
-	# ---------------------------------------------------------------------------
-
-	def get_path(self, layer):
-		path=self.nickname
-		if self.plugin_name:
-			path=path+'/'+self.plugin_name
-		return path
 
 
 #******************************************************************************

@@ -43,11 +43,11 @@ class zynthian_engine_zynaddsubfx(zynthian_engine):
 	# MIDI Controllers
 	_ctrls=[
 		#['volume','/part$i/Pvolume',96],
-		['volume',7,96],
+		['volume',7,115],
 		['panning',10,64],
-		['expression',11,127],
+		#['expression',11,127],
 		['filter cutoff',74,64],
-		['filter Q',71,64],
+		['filter resonance',71,64],
 		['panning depth','/part$i/ctl/panning.depth',64],
 		['filter.cutoff depth','/part$i/ctl/filtercutoff.depth',64],
 		['filter.Q depth','/part$i/ctl/filterq.depth',64],
@@ -77,20 +77,21 @@ class zynthian_engine_zynaddsubfx(zynthian_engine):
 
 	# Controller Screens
 	_ctrl_screens=[
-		['main',['volume','panning','filter cutoff','filter Q']],
-		['mode',['volume','sustain on/off','legato on/off','poly on/off']],
-		#['mode',['volume','drum on/off','legato on/off','poly on/off']],
+		['main',['volume','panning','filter cutoff','filter resonance']],
+		['mode',['drum on/off','sustain on/off','legato on/off','poly on/off']],
 		['portamento',['portamento on/off','portamento time','portamento up/down','portamento thresh']],
 		['modulation',['modulation','modulation amplitude','modulation depth','modulation exp']],
 		['resonance',['resonance center','res.center depth','resonance bandwidth','res.bw depth']],
 		['bandwidth',['volume','bandwidth','bandwidth depth','bandwidth exp']],
-		['velocity',['volume','expression','velocity sens.','velocity offs.']],
+		['velocity',['volume','panning','velocity sens.','velocity offs.']],
 		['depth',['volume','panning depth','filter.cutoff depth','filter.Q depth']]
 	]
+
 
 	#----------------------------------------------------------------------------
 	# Initialization
 	#----------------------------------------------------------------------------
+
 
 	def __init__(self, zyngui=None):
 		super().__init__(zyngui)
@@ -101,13 +102,15 @@ class zynthian_engine_zynaddsubfx(zynthian_engine):
 		self.osc_target_port = 6693
 	
 		if self.config_remote_display():
-			self.command=("/usr/bin/zynaddsubfx", "-O", "jack", "-I", "jack", "-P", str(self.osc_target_port), "-a")
+			self.command = "/usr/bin/zynaddsubfx -O jack-multi -I jack -P {} -a".format(self.osc_target_port)
 		else:
-			self.command=("/usr/bin/zynaddsubfx", "-O", "jack", "-I", "jack", "-P", str(self.osc_target_port), "-a", "-U")
+			self.command = "/usr/bin/zynaddsubfx -O jack-multi -I jack -P {} -a -U".format(self.osc_target_port)
 
-		self.conf_dir = self.data_dir + "/zynconf"
+		self.command_prompt = "\n\\[INFO] Main Loop..."
+
 		self.bank_dirs = [
-			('MY', self.my_data_dir + "/zynbanks"),
+			('EX', self.ex_data_dir + "/presets/zynaddsubfx"),
+			('MY', self.my_data_dir + "/presets/zynaddsubfx"),
 			('_', self.data_dir + "/zynbanks")
 		]
 		self.osc_paths_data = []
@@ -119,42 +122,53 @@ class zynthian_engine_zynaddsubfx(zynthian_engine):
 		self.osc_init()
 		self.reset()
 		
+		
 	def reset(self):
 		super().reset()
 		self.disable_all_parts()
+
 
 	# ---------------------------------------------------------------------------
 	# Layer Management
 	# ---------------------------------------------------------------------------
 
 	def add_layer(self, layer):
-		super().add_layer(layer)
-		layer.part_i=self.get_free_parts()[0]
-		logging.debug("ADD LAYER => PART %s" % layer.part_i)
+		self.layers.append(layer)
+		layer.part_i = self.get_free_parts()[0]
+		layer.jackname = "{}:part{}".format(self.jackname, layer.part_i)
+		logging.debug("ADD LAYER => Part {} ({})".format(layer.part_i, self.jackname))
+
 
 	def del_layer(self, layer):
 		super().del_layer(layer)
 		self.disable_part(layer.part_i)
-		layer.part_i=None
+		layer.part_i = None
+		layer.jackname = None
+
 
 	# ---------------------------------------------------------------------------
 	# MIDI Channel Management
 	# ---------------------------------------------------------------------------
 
+
 	def set_midi_chan(self, layer):
 		if layer.part_i is not None:
 			liblo.send(self.osc_target, "/part%d/Prcvchn" % layer.part_i, layer.get_midi_chan())
+
 
 	#----------------------------------------------------------------------------
 	# Bank Managament
 	#----------------------------------------------------------------------------
 
+
 	def get_bank_list(self, layer=None):
 		return self.get_dirlist(self.bank_dirs)
+
 
 	#----------------------------------------------------------------------------
 	# Preset Managament
 	#----------------------------------------------------------------------------
+
 
 	def get_preset_list(self, bank):
 		preset_list=[]
@@ -177,6 +191,7 @@ class zynthian_engine_zynaddsubfx(zynthian_engine):
 				preset_list.append((preset_fpath,[bank_msb,bank_lsb,prg],title,ext))
 		return preset_list
 
+
 	def set_preset(self, layer, preset, preload=False):
 		self.start_loading()
 		if preset[3]=='xiz':
@@ -198,16 +213,24 @@ class zynthian_engine_zynaddsubfx(zynthian_engine):
 		while self.loading and i<100: 
 			sleep(0.1)
 			i=i+1
+		layer.send_ctrl_midi_cc()
+		return True
+
 
 	def cmp_presets(self, preset1, preset2):
-		if preset1[0]==preset2[0]:
-			return True
-		else:
+		try:
+			if preset1[0]==preset2[0]:
+				return True
+			else:
+				return False
+		except:
 			return False
+
 
 	# ---------------------------------------------------------------------------
 	# Specific functions
 	# ---------------------------------------------------------------------------
+
 
 	def get_free_parts(self):
 		free_parts=list(range(0,16))
@@ -219,13 +242,16 @@ class zynthian_engine_zynaddsubfx(zynthian_engine):
 		logging.debug("FREE PARTS => %s" % free_parts)
 		return free_parts
 
+
 	def enable_part(self, layer):
 		if layer.part_i is not None:
 			liblo.send(self.osc_target, "/part%d/Penabled" % layer.part_i, True)
 			liblo.send(self.osc_target, "/part%d/Prcvchn" % layer.part_i, layer.get_midi_chan())
 
+
 	def disable_part(self, i):
 		liblo.send(self.osc_target, "/part%d/Penabled" % i, False)
+
 
 	def enable_layer_parts(self):
 		for layer in self.layers:
@@ -233,13 +259,16 @@ class zynthian_engine_zynaddsubfx(zynthian_engine):
 		for i in self.get_free_parts():
 			self.disable_part(i)
 
+
 	def disable_all_parts(self):
 		for i in range(0,16):
 			self.disable_part(i)
 
+
 	#----------------------------------------------------------------------------
 	# OSC Managament
 	#----------------------------------------------------------------------------
+
 
 	def osc_add_methods(self):
 			self.osc_server.add_method("/volume", 'i', self.cb_osc_load_preset)
@@ -250,14 +279,17 @@ class zynthian_engine_zynaddsubfx(zynthian_engine):
 			#self.osc_server.add_method(None, 'i', self.zyngui.cb_osc_ctrl)
 			#super().osc_add_methods()
 
+
 	def cb_osc_load_preset(self, path, args):
 		self.stop_loading()
+
 
 	#----------------------------------------------------------------------------
 	# MIDI learning
 	#----------------------------------------------------------------------------
 
-	def midi_learn(self, zctrl):
+
+	def init_midi_learn(self, zctrl):
 		if zctrl.osc_path:
 			# Set current learning-slot zctrl
 			logging.info("Learning '%s' ..." % zctrl.osc_path)
@@ -269,6 +301,7 @@ class zynthian_engine_zynaddsubfx(zynthian_engine):
 			# Setup CB method for param change
 			self.osc_server.add_method(zctrl.osc_path, 'i', self.cb_osc_param_change)
 
+
 	def midi_unlearn(self, zctrl):
 		if zctrl.osc_path in self.slot_zctrls:
 			logging.info("Unlearning '%s' ..." % zctrl.osc_path)
@@ -278,29 +311,34 @@ class zynthian_engine_zynaddsubfx(zynthian_engine):
 				self.osc_server.del_method(zctrl.osc_path, 'i')
 				logging.info("Automate Slot %d Cleared => %s" % (zctrl.slot_i, zctrl.osc_path))
 				zctrl.slot_i = None
-				return True
+				return zctrl._unset_midi_learn()
 			except Exception as e:
 				logging.warning("Can't Clear Automate Slot %s => %s" % (zctrl.osc_path,e))
 
-	def set_midi_learn(self, zctrl):
+
+	def set_midi_learn(self, zctrl, chan, cc):
 		try:
-			if zctrl.osc_path and zctrl.slot_i is not None and zctrl.midi_learn_chan is not None and zctrl.midi_learn_cc is not None:
-				logging.info("Set Automate Slot %d: %s => %d, %d" % (zctrl.slot_i, zctrl.osc_path, zctrl.midi_learn_chan, zctrl.midi_learn_cc))
+			if zctrl.osc_path and zctrl.slot_i is not None and chan is not None and cc is not None:
+				logging.info("Set Automate Slot %d: %s => %d, %d" % (zctrl.slot_i, zctrl.osc_path, chan, cc))
 				# Reset current MIDI-learning slot
 				self.current_slot_zctrl=None
-				# Call midi_learn
-				self.midi_learn(zctrl)
-				# Wait for setting automation
-				while self.current_slot_zctrl:
-					sleep(0.01)
+				if zctrl._set_midi_learn(chan, cc):
+					self.init_midi_learn(zctrl)
+					# Wait for setting automation
+					while self.current_slot_zctrl:
+						sleep(0.01)
+						return True
 		except Exception as e:
 			logging.error("Can't set slot automation for %s => %s" % (zctrl.osc_path, e))
+			return zctrl._unset_midi_learn()
+
 
 	def reset_midi_learn(self):
 		logging.info("Reset MIDI-learn ...")
 		liblo.send(self.osc_target, "/automate/clear", "*")
 		self.current_slot_zctrl=None
 		self.slot_zctrls={}
+
 
 	def cb_osc_automate_active_slot(self, path, args, types, src):
 		if self.current_slot_zctrl:
@@ -331,16 +369,23 @@ class zynthian_engine_zynaddsubfx(zynthian_engine):
 				liblo.send(self.osc_target, "/automate/slot%d/clear" % slot_i)
 				liblo.send(self.osc_target, "/automate/learn-binding-new-slot", self.current_slot_zctrl.osc_path)
 
+
 	def cb_osc_param_change(self, path, args):
 		if path in self.slot_zctrls:
 			#logging.debug("OSC Param Change %s => %s" % (path, args[0]))
-			zctrl=self.slot_zctrls[path]
 			try:
-				self.zyngui.screens['control'].get_zgui_controller(zctrl).set_value(args[0],True,False)
+				zctrl=self.slot_zctrls[path]
+				zctrl.set_value(args[0])
+
+				#Refresh GUI controller in screen when needed ...
+				if self.zyngui.active_screen=='control' and self.zyngui.screens['control'].mode=='control':
+					self.zyngui.screens['control'].set_controller_value(zctrl)
 			except:
 				pass
+
 			if zctrl.midi_learn_cc is None:
 				liblo.send(self.osc_target, "/automate/slot%d/midi-cc" % zctrl.slot_i)
+
 
 	def cb_osc_automate_slot_midi_cc(self, path, args, types, src):
 		# Test if there is a current MIDI-learning zctrl and a valid MIDI-CC number is returned
@@ -353,19 +398,22 @@ class zynthian_engine_zynaddsubfx(zynthian_engine):
 				cc = int(args[0]) % 128
 				logging.debug("Automate Slot %d MIDI-CC: %s => %s" % (slot_i, path, args[0]))
 				if self.current_slot_zctrl.slot_i==slot_i:
-					self.current_slot_zctrl.cb_midi_learn(chan,cc)
+					self.current_slot_zctrl._cb_midi_learn(chan,cc)
 					self.current_slot_zctrl=None
 			except Exception as e:
 				logging.error("Can't match zctrl slot for the returned MIDI-CC! => %s" % e)
+
 
 	# ---------------------------------------------------------------------------
 	# Deprecated functions
 	# ---------------------------------------------------------------------------
 
+
 	def cb_osc_paths(self, path, args, types, src):
 		self.get_cb_osc_paths(path, args, types, src)
 		self.zyngui.screens['control'].list_data=self.osc_paths_data
 		self.zyngui.screens['control'].fill_list()
+
 
 	def get_cb_osc_paths(self, path, args, types, src):
 		for a, t in zip(args, types):
@@ -414,5 +462,6 @@ class zynthian_engine_zynaddsubfx(zynthian_engine):
 				title=prefix+a+postfix
 				path=firstchar+a+lastchar
 				self.osc_paths_data.append((path,tnode,title))
+
 
 #******************************************************************************

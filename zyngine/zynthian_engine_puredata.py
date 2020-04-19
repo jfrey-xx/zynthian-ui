@@ -23,11 +23,10 @@
 #******************************************************************************
 
 import os
-import re
 import logging
-import time
 import subprocess
 import oyaml as yaml
+from time import sleep
 from collections import OrderedDict
 from os.path import isfile,isdir,join
 
@@ -61,23 +60,28 @@ class zynthian_engine_puredata(zynthian_engine):
 
 	def __init__(self, zyngui=None):
 		super().__init__(zyngui)
+
+		self.type = "Special"
 		self.name = "PureData"
 		self.nickname = "PD"
-		self.jackname = "Pure Data"
+		self.jackname = "pure_data_0"
 
-		self.options['midi_chan']=False
+		#self.options['midi_chan']=False
 
 		self.preset = ""
 		self.preset_config = None
 
 		self.bank_dirs = [
+			('EX', self.ex_data_dir + "/presets/puredata"),
 			('_', self.my_data_dir + "/presets/puredata")
 		]
 
+		startup_patch=os.environ.get('ZYNTHIAN_MY_DATA_DIR',"/zynthian/zynthian-my-data") + "/presets/puredata/zynthian_startup.pd"
+
 		if self.config_remote_display():
-			self.base_command=("/usr/bin/pd", "-jack", "-rt", "-alsamidi", "-mididev", "1", "-send", ";pd dsp 1")
+			self.base_command="/usr/bin/pd -jack -rt -alsamidi -mididev 1 -open \"{}\"".format(startup_patch)
 		else:
-			self.base_command=("/usr/bin/pd", "-nogui", "-jack", "-rt", "-alsamidi", "-mididev", "1", "-send", ";pd dsp 1")
+			self.base_command="/usr/bin/pd -nogui -jack -rt -alsamidi -mididev 1 -open \"{}\"".format(startup_patch)
 
 		self.reset()
 
@@ -93,30 +97,35 @@ class zynthian_engine_puredata(zynthian_engine):
 	# Bank Managament
 	#----------------------------------------------------------------------------
 
+
 	def get_bank_list(self, layer=None):
 		return self.get_dirlist(self.bank_dirs)
 
-	def set_bank(self, layer, bank):
-		pass
 
+	def set_bank(self, layer, bank):
+		return True
 
 	#----------------------------------------------------------------------------
 	# Preset Managament
 	#----------------------------------------------------------------------------
 
+
 	def get_preset_list(self, bank):
 		return self.get_dirlist(bank[0])
 
+
 	def set_preset(self, layer, preset, preload=False):
-		if preset[0] != self.preset:
-			self.start_loading()
-			self.load_preset_config(preset)
-			self.command=self.base_command+(self.get_preset_filepath(preset),)
-			self.preset=preset[0]
-			self.stop()
-			self.start(True,False)
-			self.refresh_all()
-			self.stop_loading()
+		self.load_preset_config(preset)
+		self.command=self.base_command+ " " + self.get_preset_filepath(preset)
+		self.preset=preset[0]
+		self.stop()
+		self.start()
+		self.refresh_all()
+		sleep(0.3)
+		self.zyngui.zynautoconnect(True)
+		layer.send_ctrl_midi_cc()
+		return True
+
 
 	def load_preset_config(self, preset):
 		config_fpath = preset[0] + "/zynconfig.yml"
@@ -124,11 +133,12 @@ class zynthian_engine_puredata(zynthian_engine):
 			with open(config_fpath,"r") as fh:
 				yml = fh.read()
 				logging.info("Loading preset config file %s => \n%s" % (config_fpath,yml))
-				self.preset_config = yaml.load(yml)
+				self.preset_config = yaml.load(yml, Loader=yaml.SafeLoader)
 				return True
 		except Exception as e:
 			logging.error("Can't load preset config file '%s': %s" % (config_fpath,e))
 			return False
+
 
 	def get_preset_filepath(self, preset):
 		if self.preset_config:
@@ -147,8 +157,10 @@ class zynthian_engine_puredata(zynthian_engine):
 		preset_fpath = join(preset[0],os.listdir(preset[0])[0])
 		return preset_fpath
 
+
 	def cmp_presets(self, preset1, preset2):
 		return True
+
 
 	#----------------------------------------------------------------------------
 	# Controllers Managament
@@ -170,7 +182,7 @@ class zynthian_engine_puredata(zynthian_engine):
 					if isinstance(options,int):
 						options={ 'midi_cc': options }
 					if 'midi_chan' not in options:
-						options['midi_chan']=0
+						options['midi_chan']=layer.midi_chan
 					midi_cc=options['midi_cc']
 					logging.debug("CTRL %s: %s" % (midi_cc, name))
 					title=str.replace(name, '_', ' ')

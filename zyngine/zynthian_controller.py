@@ -39,15 +39,17 @@ class zynthian_controller:
 			self.name=self.short_name=name
 		else:
 			self.name=self.short_name=symbol
+
 		self.value=0
 		self.value_default=0
 		self.value_min=0
+		self.value_mid=64
 		self.value_max=127
 		self.value_range=127
 		self.labels=None
 		self.ticks=None
 		self.is_toggle=False
-		self.is_integer=False
+		self.is_integer=True
 
 		self.midi_chan=None
 		self.midi_cc=None
@@ -63,6 +65,7 @@ class zynthian_controller:
 
 		if options:
 			self.set_options(options)
+
 
 	def set_options(self, options):
 		if 'symbol' in options:
@@ -99,93 +102,130 @@ class zynthian_controller:
 			self.graph_path=options['graph_path']
 		self._configure()
 
+
 	def _configure(self):
 		#Configure Selector Controller
-		if self.ticks and self.labels:
-			#Calculate min, max and range
-			self.value_min=self.ticks[0]
-			self.value_max=self.ticks[-1]
+		if self.labels:
+
+			if not self.ticks:
+				#Generate ticks ...
+				n = len(self.labels)
+				self.ticks = []
+				if self.is_integer:
+					for i in range(n):
+						self.ticks.append(self.value_min+int(i*(self.value_max+1)/n))
+				else:
+					for i in range(n):
+						self.ticks.append(self.value_min+i*self.value_max/n)
+
+			#Calculate min, max
+			if self.ticks[0]<=self.ticks[-1]:
+				self.value_min = self.ticks[0]
+				self.value_max = self.ticks[-1]
+			else:
+				self.value_min = self.ticks[-1]
+				self.value_max = self.ticks[0]
+
 			#Generate dictionary for fast conversion labels=>values
-			self.label2value={}
-			self.value2label={}
+			self.label2value = {}
+			self.value2label = {}
 			for i in range(len(self.labels)):
-				self.label2value[str(self.labels[i])]=self.ticks[i]
-				self.value2label[str(self.ticks[i])]=self.labels[i]
+				self.label2value[str(self.labels[i])] = self.ticks[i]
+				self.value2label[str(self.ticks[i])] = self.labels[i]
+
 		#Common configuration
-		self.value_range=self.value_max-self.value_min
+		self.value_range = self.value_max-self.value_min
+
+		if self.is_integer:
+			self.value_mid = self.value_min+int(self.value_range/2)
+		else:
+			self.value_mid = self.value_min+self.value_range/2
+
 		self._set_value(self.value)
 		if self.value_default is None:
 			self.value_default=self.value
 
+
 	def setup_controller(self, chan, cc, val, maxval=127):
-		self.midi_chan=chan
+		self.midi_chan = chan
 
 		# OSC Path / MIDI CC
 		if isinstance(cc,str):
-			self.osc_path=cc
+			self.osc_path = cc
 		else:
-			self.midi_cc=cc
+			self.midi_cc = cc
 
-		self.value_min=0
-		self.value_max=127
-		self.value=val
+		self.value_min = 0
+		self.value_max = 127
+		self.value = val
+		self.is_toggle = False
+		self.is_integer = True
+
 		# Numeric
 		if isinstance(maxval,int):
-			self.value_max=maxval
+			self.value_max = maxval
 		# Selector
 		elif isinstance(maxval,str):
 			self.labels=maxval.split('|')
 		elif isinstance(maxval,list):
 			if isinstance(maxval[0],list):
-				self.labels=maxval[0]
-				self.ticks=maxval[1]
+				self.labels = maxval[0]
+				self.ticks = maxval[1]
 			else:
-				self.labels=maxval
+				self.labels = maxval
+
 		self._configure()
 
+
 	def set_midi_chan(self, chan):
-		self.midi_chan=chan
+		self.midi_chan = chan
+
 
 	def get_ctrl_array(self):
-		tit=self.short_name
+		tit = self.short_name
 		if self.midi_chan:
-			chan=self.midi_chan
+			chan = self.midi_chan
 		else:
-			chan=0
+			chan = 0
 		if self.midi_cc:
-			ctrl=self.midi_cc
+			ctrl = self.midi_cc
 		elif self.osc_path:
-			ctrl=self.osc_path
+			ctrl = self.osc_path
 		elif self.graph_path:
-			ctrl=self.graph_path
+			ctrl = self.graph_path
 		
 		if self.labels:
-			val=self.get_value2label()
+			val = self.get_value2label()
 			if self.ticks:
-				minval=[self.labels, self.ticks]
-				maxval=None
+				minval = [self.labels, self.ticks]
+				maxval = None
 			else:
-				minval=self.labels
-				maxval=None
+				minval = self.labels
+				maxval = None
 		else:
-			val=self.value
-			minval=self.value_min
-			maxval=self.value_max
+			val = self.value
+			minval = self.value_min
+			maxval = self.value_max
 		return [tit,chan,ctrl,val,minval,maxval]
+
 
 	def get_value(self):
 		return self.value
 
-	def _set_value(self, val, force_sending=False):
+
+	def _set_value(self, val):
 		if isinstance(val, str):
-			self.value=self.get_label2value(val)
+			self.value = self.get_label2value(val)
 			return
 
 		elif self.is_toggle:
-			if val==self.value_min:
-				self.value=self.value_min
+			if val==self.value_min or val==self.value_max:
+				self.value = val
 			else:
-				self.value=self.value_max
+				if val<self.value_mid:
+					self.value = self.value_min
+				else:
+					self.value = self.value_max
 			return
 
 		elif self.ticks:
@@ -193,7 +233,7 @@ class zynthian_controller:
 			pass
 
 		elif self.is_integer:
-			val=int(val)
+			val = int(val)
 
 		if val>self.value_max:
 			self.value=self.value_max
@@ -202,46 +242,66 @@ class zynthian_controller:
 		else:
 			self.value=val
 
+
 	def set_value(self, val, force_sending=False):
 		self._set_value(val)
 
-		# Send value ...
 		if self.engine:
+			mval=self.get_ctrl_midi_val()
 			try:
+				# Send value using engine method...
 				self.engine.send_controller_value(self)
 			except:
 				if force_sending:
 					try:
+						# Send value using OSC/MIDI ...
 						if self.osc_path:
-							sval=self.get_ctrl_osc_val()
-							liblo.send(self.engine.osc_target,self.osc_path,sval)
-						elif self.midi_cc>0:
-							sval=self.get_ctrl_midi_val()
-							self.engine.zyngui.zynmidi.set_midi_control(self.midi_chan,self.midi_cc,sval)
-						logging.debug("Sending controller '%s' value => %s (%s)" % (self.symbol,val,sval))
-					except:
-						logging.warning("Can't send controller '%s' value" % self.symbol)
+							liblo.send(self.engine.osc_target,self.osc_path,self.get_ctrl_osc_val())
+						elif self.midi_cc:
+							zyncoder.lib_zyncoder.zynmidi_send_ccontrol_change(self.midi_chan,self.midi_cc,mval)
 
-	def get_value2label(self, val):
+						logging.debug("Sending controller '{}' value => {} ({})".format(self.symbol,val,mval))
+
+					except Exception as e:
+						logging.warning("Can't send controller '{}' value => {}".format(self.symbol,e))
+
+			if force_sending:
+				try:
+					# Send feedback to MIDI controllers
+					if self.midi_learn_cc:
+						zyncoder.lib_zyncoder.ctrlfb_send_ccontrol_change(self.midi_learn_chan,self.midi_learn_cc,mval)
+					elif self.midi_cc:
+						zyncoder.lib_zyncoder.ctrlfb_send_ccontrol_change(self.midi_chan,self.midi_cc,mval)
+
+				except Exception as e:
+					logging.warning("Can't send controller feedback '{}' value => {}".format(self.symbol,e))
+
+
+	def get_value2label(self, val=None):
+		if val is None:
+			val=self.value
 		try:
 			if self.ticks:
 				if self.ticks[0]>self.ticks[-1]:
 					for i in reversed(range(len(self.labels))):
 						if val<=self.ticks[i]:
 							return self.labels[i]
-						return self.labels[0]
+					return self.labels[0]
 				else:
 					for i in range(len(self.labels)-1):
+						#logging.debug("V2L testing range {} => {} in {}-{}".format(i,val,self.ticks[i],self.ticks[i+1]))
 						if val<self.ticks[i+1]:
 							return self.labels[i]
-						return self.labels[i+1]
+					return self.labels[i+1]
 			elif self.labels:
-				i=int((self.value-self.value_min)*(len(self.labels)-1)/self.value_range)
+				i=min(int((val-self.value_min)*len(self.labels)/self.value_range), len(self.labels)-1)
+				#logging.debug("V2L => {} has index {}".format(val,i))
 				return self.labels[i]
 			else:
 				return val
 		except Exception as e:
 			logging.error(e)
+
 
 	def get_label2value(self, label):
 		try:
@@ -250,19 +310,26 @@ class zynthian_controller:
 			elif self.labels:
 				i=self.labels.index(label)
 				if i>=0:
-					return self.value_min+i*self.value_range/(len(self.labels)-1)
+					#logging.debug("L2V => {} has index {}".format(label,i))
+					if self.is_integer and self.value_range==127:
+						return self.value_min+i*128/len(self.labels)
+					else:
+						return self.value_min+i*self.value_range/len(self.labels)
 			else:
 				logging.error("No labels defined")
+
 		except Exception as e:
 			logging.error(e)
 
+
 	def get_ctrl_midi_val(self):
 		try:
-			val=int(127*(self.value-self.value_min)/(self.value_max-self.value_min))
+			val=min(127, int(127*(self.value-self.value_min)/self.value_range))
 		except Exception as e:
 			logging.error(e)
 			val=0
 		return val
+
 
 	def get_ctrl_osc_val(self):
 		if self.labels and len(self.labels)==2:
@@ -270,9 +337,11 @@ class zynthian_controller:
 			elif self.value=='off': return False
 		return self.value
 
+
 	#--------------------------------------------------------------------------
 	# Snapshots
 	#--------------------------------------------------------------------------
+
 
 	def get_snapshot(self):
 		snapshot = {
@@ -291,6 +360,7 @@ class zynthian_controller:
 
 		return snapshot
 
+
 	def restore_snapshot(self, snapshot):
 		if isinstance(snapshot, dict):
 			self.set_value(snapshot['value'], True)
@@ -303,14 +373,16 @@ class zynthian_controller:
 		else:
 			self.set_value(snapshot,True)
 
+
 	#--------------------------------------------------------------------------
-	# MIDI Learning
+	# MIDI Learning (Generic Methods)
 	#--------------------------------------------------------------------------
 
-	def midi_learn(self):
+
+	def init_midi_learn(self):
 		# Learn only if there is a working engine ...
 		if self.engine:
-			logging.info("MIDI learn: %s" % self.symbol)
+			logging.info("Init MIDI-learn: %s" % self.symbol)
 			
 			# If already learned, unlearn
 			if self.midi_learn_cc:
@@ -319,12 +391,12 @@ class zynthian_controller:
 			# If not a CC-mapped controller, delegate to engine's MIDI-learning implementation
 			if not self.midi_cc:
 				try:
-					self.engine.midi_learn(self)
-				except:
-					logging.error("MIDI Learn NOT IMPLEMENTED!")
+					self.engine.init_midi_learn(self)
+				except Exception as e:
+					logging.error(e)
 
 			# Call GUI method
-			self.engine.zyngui.set_midi_learn(self)
+			self.engine.zyngui.init_midi_learn(self)
 
 
 	def midi_unlearn(self):
@@ -335,88 +407,123 @@ class zynthian_controller:
 
 			# If standard MIDI-CC controller, delete MIDI router map
 			if self.midi_cc:
-				try:
-					if zyncoder.lib_zyncoder.del_midi_filter_cc_swap(ctypes.c_ubyte(self.midi_learn_chan), ctypes.c_ubyte(self.midi_learn_cc)):
-						logging.info("Deleted MIDI filter CC map: %s, %s" % (self.midi_learn_chan, self.midi_learn_cc))
-						unlearned=True
-					else:
-						logging.error("Can't delete MIDI filter CC swap map: Call returned 0")
-				except:
-					logging.error("Can't delete MIDI filter CC swap map: %s, %s" % (self.midi_learn_chan, self.midi_learn_cc))
+				unlearned = self.midi_unlearn_zyncoder()
 
 			# Else delegate to engine's MIDI-learning implementation
 			else:
 				try:
-					if self.engine.midi_unlearn(self):
-						unlearned=True
-				except:
-					logging.error("MIDI Unlearn => NOT IMPLEMENTED!")
+					unlearned = self.engine.midi_unlearn(self)
+				except Exception as e:
+					logging.error(e)
 
-			# If success unlearning ...
 			if unlearned:
-
-				# Clear variables
-				self.midi_learn_chan=None
-				self.midi_learn_cc=None
-
 				# Call GUI method
-				try:
-					self.engine.zyngui.unset_midi_learn()
-				except:
-					pass
-
-				# MIDI Unlearning success
+				self.engine.zyngui.refresh_midi_learn()
+				# Return success
 				return True
-
-			# Else unlearning failure
 			else:
 				return False
 
-		#If	not engine or nothing to unlearn, return success
+		# If not engine or nothing to unlearn, return success
 		return True
 
 
 	def set_midi_learn(self, chan, cc):
+		# Learn only if there is a working engine ...
 		if self.engine:
 			self.midi_unlearn()
-			self.cb_midi_learn(chan,cc)
 
-			if not self.midi_cc:
+			# If standard MIDI-CC controller, create zyncoder MIDI router map ...
+			if self.midi_cc:
+				return self.midi_learn_zyncoder(chan, cc)
+			else:
 				try:
-					self.engine.set_midi_learn(self)
-				except:
-					logging.error("Set MIDI learn => NOT IMPLEMENTED!")
+					return self.engine.set_midi_learn(self, chan, cc)
+				except Exception as e:
+					logging.error(e)
+
+
+	def _set_midi_learn(self, chan, cc):
+		logging.info("MIDI-CC SET '{}' => {}, {}".format(self.symbol, chan, cc))
+		
+		self.midi_learn_chan = chan
+		self.midi_learn_cc = cc
+
+		return True
+
+
+	def _unset_midi_learn(self):
+		logging.info("MIDI-CC UNSET '{}' => {}, {}".format(self.symbol, self.midi_learn_chan, self.midi_learn_cc))
+		
+		self.midi_learn_chan = None
+		self.midi_learn_cc = None
+
+		return True
 
 
 	def cb_midi_learn(self, chan, cc):
 		# Learn only if there is a working engine ...
 		if self.engine:
-			logging.info("MIDI-CC bond '%s' => %d, %d" % (self.symbol,chan,cc))
+			learned=False
 
-			# If standard MIDI-CC controller, create MIDI router map
+			# If standard MIDI-CC controller, create zyncoder MIDI router map ...
 			if self.midi_cc:
+				learned = self.midi_learn_zyncoder(chan, cc)
+			else:
 				try:
-					if zyncoder.lib_zyncoder.set_midi_filter_cc_swap(ctypes.c_ubyte(chan), ctypes.c_ubyte(cc), ctypes.c_ubyte(self.midi_chan), ctypes.c_ubyte(self.midi_cc)):
-						logging.info("Set MIDI filter CC map: (%s, %s) => (%s, %s)" % (chan, cc, self.midi_chan, self.midi_cc))
-					else:
-						logging.error("Can't set MIDI filter CC swap map: call returned 0")
-						return False
+					learned = self.engine.cb_midi_learn(self, chan, cc)
 				except Exception as e:
-					logging.error("Can't set MIDI filter CC swap map: (%s, %s) => (%s, %s) => %s" % (self.midi_learn_chan, self.midi_learn_cc, self.midi_chan, self.midi_cc, e))
 					return False
 
-			# MIDI learning success
-			self.midi_learn_chan=chan
-			self.midi_learn_cc=cc
+			if learned:
+				# Call GUI method
+				self.engine.zyngui.end_midi_learn()
+				# Return success
+				return True
+			else:
+				return False
 
-			# Call GUI method ...
-			try:
-				self.engine.zyngui.unset_midi_learn()
-			except:
-				pass
-
-		#If	not engine or MIDI learning success, return True
 		return True
+
+
+	def _cb_midi_learn(self, chan, cc):
+		if self._set_midi_learn(chan, cc):
+			self.engine.zyngui.end_midi_learn()
+			return True
+
+
+	#--------------------------------------------------------------------------
+	# MIDI Learning (Native Zyncoder CC-Map Implementation)
+	#--------------------------------------------------------------------------
+
+
+	def midi_learn_zyncoder(self, chan, cc):
+		try:
+			if zyncoder.lib_zyncoder.set_midi_filter_cc_swap(ctypes.c_ubyte(chan), ctypes.c_ubyte(cc), ctypes.c_ubyte(self.midi_chan), ctypes.c_ubyte(self.midi_cc)):
+				logging.info("Set MIDI filter CC map: (%s, %s) => (%s, %s)" % (chan, cc, self.midi_chan, self.midi_cc))
+				return self._set_midi_learn(chan, cc)
+			else:
+				logging.error("Can't set MIDI filter CC swap map: call returned 0")
+
+		except Exception as e:
+			logging.error("Can't set MIDI filter CC swap map: (%s, %s) => (%s, %s) => %s" % (self.midi_learn_chan, self.midi_learn_cc, self.midi_chan, self.midi_cc, e))
+
+
+	def midi_unlearn_zyncoder(self):
+		try:
+			if zyncoder.lib_zyncoder.del_midi_filter_cc_swap(ctypes.c_ubyte(self.midi_learn_chan), ctypes.c_ubyte(self.midi_learn_cc)):
+				logging.info("Deleted MIDI filter CC map: {}, {}".format(self.midi_learn_chan, self.midi_learn_cc))
+				return self._unset_midi_learn()
+			else:
+				logging.error("Can't delete MIDI filter CC swap map: Call returned 0")
+
+		except Exception as e:
+			logging.error("Can't delete MIDI filter CC swap map: {}, {} => {}".format(self.midi_learn_chan, self.midi_learn_cc,e))
+
+
+	#----------------------------------------------------------------------------
+	# MIDI CC processing
+	#----------------------------------------------------------------------------
 
 
 	def midi_control_change(self, val):

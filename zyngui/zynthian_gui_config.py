@@ -42,10 +42,10 @@ import zynconf
 log_level=int(os.environ.get('ZYNTHIAN_LOG_LEVEL',logging.WARNING))
 #log_level=logging.DEBUG
 
-raise_exceptions=int(os.environ.get('ZYNTHIAN_RAISE_EXCEPTIONS',False))
-
 # Set root logging level
 logging.basicConfig(stream=sys.stderr, level=log_level)
+
+logging.info("ZYNTHIAN-UI CONFIG ...")
 
 #------------------------------------------------------------------------------
 # Wiring layout
@@ -73,7 +73,7 @@ else:
 	zynswitch_pin=None
 
 #------------------------------------------------------------------------------
-# Zyncoder GPIO pin assignment (wiringPi numbering)
+# Encoder & Switches GPIO pin assignment (wiringPi numbering)
 #------------------------------------------------------------------------------
 
 # First Prototype => Generic Plastic Case
@@ -124,6 +124,22 @@ elif wiring_layout=="PROTOTYPE-5":
 	if not zyncoder_pin_b: zyncoder_pin_b=[21,27,7,3]
 	if not zynswitch_pin: zynswitch_pin=[107,105,106,104]
 	select_ctrl=3
+elif wiring_layout=="MCP23017_ENCODERS":
+	if not zyncoder_pin_a: zyncoder_pin_a=[102,105,110,113]
+	if not zyncoder_pin_b: zyncoder_pin_b=[101,104,109,112]
+	if not zynswitch_pin: zynswitch_pin=[100,103,108,111]
+	select_ctrl=3
+elif wiring_layout=="MCP23017_EXTRA":
+	if not zyncoder_pin_a: zyncoder_pin_a=[102,105,110,113]
+	if not zyncoder_pin_b: zyncoder_pin_b=[101,104,109,112]
+	if not zynswitch_pin: zynswitch_pin=[100,103,108,111,106,107,114,115]
+	select_ctrl=3
+elif wiring_layout=="I2C_HWC":
+	if not zyncoder_pin_a: zyncoder_pin_a=[1,2,3,4]
+	zyncoder_pin_b=[0,0,0,0]
+	if not zynswitch_pin: zynswitch_pin=[1,2,3,4]
+	select_ctrl=3
+
 # Desktop Development & Emulation
 elif wiring_layout=="EMULATOR":
 	if not zyncoder_pin_a: zyncoder_pin_a=[4,5,6,7]
@@ -136,6 +152,7 @@ elif wiring_layout=="DUMMIES":
 	if not zyncoder_pin_b: zyncoder_pin_b=[0,0,0,0]
 	if not zynswitch_pin: zynswitch_pin=[0,0,0,0]
 	select_ctrl=3
+# Custom Config => blank
 elif wiring_layout=="CUSTOM":
 	select_ctrl=3
 # Default to DUMMIES
@@ -149,6 +166,33 @@ else:
 logging.debug("ZYNCODER A: %s" % zyncoder_pin_a)
 logging.debug("ZYNCODER B: %s" % zyncoder_pin_b)
 logging.debug("SWITCHES layout: %s" % zynswitch_pin)
+
+
+#------------------------------------------------------------------------------
+# Custom Switches Action Configuration
+#------------------------------------------------------------------------------
+
+n_custom_switches = 4
+
+custom_switch_ui_actions = []
+custom_switch_midi_cc = []
+
+for i in range(0, n_custom_switches):
+	cuias = {}
+	cc_num = None
+
+	root_varname = "ZYNTHIAN_WIRING_CUSTOM_SWITCH_{0:0>2}".format(i+1)
+	if os.environ.get(root_varname) == "UI_ACTION":
+		cuias['S'] = os.environ.get(root_varname + "__UI_SHORT")
+		cuias['B'] = os.environ.get(root_varname + "__UI_BOLD")
+		cuias['L'] = os.environ.get(root_varname + "__UI_LONG")
+
+	elif os.environ.get(root_varname) == "MIDI_CC":
+		cc_num = os.environ.get(root_varname + "__CC_NUM")
+
+	custom_switch_ui_actions.append(cuias)
+	custom_switch_midi_cc.append(cc_num)
+
 
 #------------------------------------------------------------------------------
 # UI Geometric Parameters
@@ -185,7 +229,10 @@ color_tx=os.environ.get('ZYNTHIAN_UI_COLOR_TX',"#ffffff")
 color_tx_off=os.environ.get('ZYNTHIAN_UI_COLOR_TX_OFF',"#e0e0e0")
 color_on=os.environ.get('ZYNTHIAN_UI_COLOR_ON',"#ff0000")
 color_off=os.environ.get('ZYNTHIAN_UI_COLOR_OFF',"#5a626d")
-color_hl=os.environ.get('ZYNTHIAN_UI_COLOR_HL',"#00D000")
+color_hl=os.environ.get('ZYNTHIAN_UI_COLOR_HL',"#00b000")
+color_ml=os.environ.get('ZYNTHIAN_UI_COLOR_ML',"#f0f000")
+color_low_on=os.environ.get('ZYNTHIAN_UI_COLOR_LOW_ON',"#b00000")
+color_info=os.environ.get('ZYNTHIAN_UI_COLOR_INFO',"#0000e0")
 color_panel_bg=os.environ.get('ZYNTHIAN_UI_COLOR_PANEL_BG',"#3a424d")
 
 # Color Scheme
@@ -197,6 +244,10 @@ color_ctrl_bg_off=color_off
 color_ctrl_bg_on=color_on
 color_ctrl_tx=color_tx
 color_ctrl_tx_off=color_tx_off
+color_status_midi=color_info
+color_status_play=color_hl
+color_status_record=color_low_on
+color_status_error=color_on
 
 #------------------------------------------------------------------------------
 # UI Font Parameters
@@ -208,7 +259,7 @@ font_family=os.environ.get('ZYNTHIAN_UI_FONT_FAMILY',"Audiowide")
 #font_family="Orbitron" #=> Nice, but too strange
 #font_family="Abel" #=> Quite interesting, also "Strait"
 
-font_size=int(os.environ.get('ZYNTHIAN_UI_FONT_SIZE',10))
+font_size=int(os.environ.get('ZYNTHIAN_UI_FONT_SIZE',None))
 
 #------------------------------------------------------------------------------
 # UI Cursor
@@ -217,18 +268,48 @@ font_size=int(os.environ.get('ZYNTHIAN_UI_FONT_SIZE',10))
 force_enable_cursor=int(os.environ.get('ZYNTHIAN_UI_ENABLE_CURSOR',False))
 
 #------------------------------------------------------------------------------
+# UI Options
+#------------------------------------------------------------------------------
+
+restore_last_state=int(os.environ.get('ZYNTHIAN_UI_RESTORE_LAST_STATE',False))
+show_cpu_status=int(os.environ.get('ZYNTHIAN_UI_SHOW_CPU_STATUS',False))
+
+#------------------------------------------------------------------------------
 # MIDI Configuration
 #------------------------------------------------------------------------------
 
 def set_midi_config():
+	global preset_preload_noteon, midi_single_active_channel
+	global midi_network_enabled, midi_touchosc_enabled, midi_aubionotes_enabled
+	global midi_prog_change_zs3, midi_fine_tuning, midi_filter_rules
 	global master_midi_channel, master_midi_change_type
 	global master_midi_program_change_up, master_midi_program_change_down
 	global master_midi_program_base, master_midi_bank_change_ccnum
 	global master_midi_bank_change_up, master_midi_bank_change_down
 	global master_midi_bank_change_down_ccnum, master_midi_bank_base
-	global preset_preload_noteon, midi_single_active_channel, midi_fine_tuning
-	global midi_filter_rules, disabled_midi_in_ports, enabled_midi_out_ports
+	global disabled_midi_in_ports, enabled_midi_out_ports, enabled_midi_fb_ports
 
+	# MIDI options
+	midi_fine_tuning=int(os.environ.get('ZYNTHIAN_MIDI_FINE_TUNING',440))
+	midi_single_active_channel=int(os.environ.get('ZYNTHIAN_MIDI_SINGLE_ACTIVE_CHANNEL',0))
+	midi_prog_change_zs3=int(os.environ.get('ZYNTHIAN_MIDI_PROG_CHANGE_ZS3',1))
+	preset_preload_noteon=int(os.environ.get('ZYNTHIAN_MIDI_PRESET_PRELOAD_NOTEON',1))
+	midi_network_enabled=int(os.environ.get('ZYNTHIAN_MIDI_NETWORK_ENABLED',0))
+	midi_touchosc_enabled=int(os.environ.get('ZYNTHIAN_MIDI_TOUCHOSC_ENABLED',0))
+	midi_aubionotes_enabled=int(os.environ.get('ZYNTHIAN_MIDI_AUBIONOTES_ENABLED',0))
+
+	# Filter Rules
+	midi_filter_rules=os.environ.get('ZYNTHIAN_MIDI_FILTER_RULES',"")
+	midi_filter_rules=midi_filter_rules.replace("\\n","\n")
+
+	# MIDI Ports
+	midi_ports=os.environ.get('ZYNTHIAN_MIDI_PORTS',"DISABLED_IN=\nENABLED_OUT=ttymidi:MIDI_out\nENABLED_FB=")
+	midi_ports=midi_ports.replace("\\n","\n")
+	disabled_midi_in_ports=zynconf.get_disabled_midi_in_ports(midi_ports)
+	enabled_midi_out_ports=zynconf.get_enabled_midi_out_ports(midi_ports)
+	enabled_midi_fb_ports=zynconf.get_enabled_midi_fb_ports(midi_ports)
+
+	# Master Channel Features
 	master_midi_channel=int(os.environ.get('ZYNTHIAN_MIDI_MASTER_CHANNEL',16))
 
 	master_midi_change_type=os.environ.get('ZYNTHIAN_MIDI_MASTER_CHANGE_TYPE',"Roland")
@@ -270,20 +351,15 @@ def set_midi_config():
 	master_midi_bank_change_up=int('{:<06}'.format(master_midi_bank_change_up.replace('#',mmc_hex)),16)
 	master_midi_bank_change_down=int('{:<06}'.format(master_midi_bank_change_down.replace('#',mmc_hex)),16)
 
-	preset_preload_noteon=int(os.environ.get('ZYNTHIAN_MIDI_PRESET_PRELOAD_NOTEON',1))
-	midi_single_active_channel=int(os.environ.get('ZYNTHIAN_MIDI_SINGLE_ACTIVE_CHANNEL',0))
-	midi_fine_tuning=int(os.environ.get('ZYNTHIAN_MIDI_FINE_TUNING',440))
-
-	midi_filter_rules=os.environ.get('ZYNTHIAN_MIDI_FILTER_RULES',"")
-	midi_filter_rules=midi_filter_rules.replace("\\n","\n")
-
-	midi_ports=os.environ.get('ZYNTHIAN_MIDI_PORTS',"DISABLED_IN=\nENABLED_OUT=MIDI_out")
-	midi_ports=midi_ports.replace("\\n","\n")
-	disabled_midi_in_ports=zynconf.get_disabled_midi_in_ports(midi_ports)
-	enabled_midi_out_ports=zynconf.get_enabled_midi_out_ports(midi_ports)
 
 #Set MIDI config variables
 set_midi_config()
+
+#------------------------------------------------------------------------------
+# Player configuration
+#------------------------------------------------------------------------------
+midi_play_loop=int(os.environ.get('ZYNTHIAN_MIDI_PLAY_LOOP',0))
+audio_play_loop=int(os.environ.get('ZYNTHIAN_AUDIO_PLAY_LOOP',0))
 
 #------------------------------------------------------------------------------
 # Create & Configure Top Level window 
@@ -295,18 +371,22 @@ top = tkinter.Tk()
 try:
 	if not display_width:
 		display_width = top.winfo_screenwidth()
-		ctrl_width=int(display_width/4)
+		ctrl_width = int(display_width/4)
 	if not display_height:
 		display_height = top.winfo_screenheight()
-		topbar_height=int(display_height/10)
-		ctrl_height=int((display_height-topbar_height)/2)
+		topbar_height = int(display_height/10)
+		ctrl_height = int((display_height-topbar_height)/2)
 except:
 	logging.warning("Can't get screen size. Using default 320x240!")
 	display_width = 320
 	display_height = 240
-	topbar_height=int(display_height/10)
-	ctrl_width=int(display_width/4)
-	ctrl_height=int((display_height-topbar_height)/2)
+	topbar_height = int(display_height/10)
+	ctrl_width = int(display_width/4)
+	ctrl_height = int((display_height-topbar_height)/2)
+
+# Adjust font size, if not defined
+if not font_size:
+	font_size = int(display_width/32)
 
 # Adjust Root Window Geometry
 top.geometry(str(display_width)+'x'+str(display_height))

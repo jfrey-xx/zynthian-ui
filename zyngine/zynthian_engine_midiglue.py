@@ -23,10 +23,23 @@ class zynthian_engine_midiglue(zynthian_engine):
         ['main',['volume','modulation','ctrl 2','ctrl 3']]
     ]
 
+    # first string: key to retrieve preset in sounds' dict, second string: how it is diplayed in the GUI
     bank_list=[
-        ('Steinway D',1,'Steinway D','_','D4:A'),
-        ('Steinway B',2,'Steinway B','_','Modelb:A'),
+        ('Studio Set',1,'Studio Set'),
+        ('Supernatural',2,'Supernatural'),
     ]
+    
+    sounds={
+            "Studio Set": [
+                ("",[85,64,1],"FA Preview"),
+                ("",[85,64,2],"Jazz Duo")
+            ],
+            "Supernatural": [
+                ("",[89,64,1],"Piano: Full Grand 1"),
+                ("",[85,64,21],"E.Piano: Phaser Dyno"),
+                ("",[85,64,89],"Ensemble Strings: StringsSect1"),
+            ]
+    }
 
     #----------------------------------------------------------------------------
     # Initialization
@@ -36,21 +49,14 @@ class zynthian_engine_midiglue(zynthian_engine):
         super().__init__(zyngui)
         self.name = "MidiGlue"
         self.nickname = "MG"
-        self.jackname = "MidiGlue"
+        # aiming at Roland FP-30
+        self.jackname = "Roland Digital Piano"
 
         self.options['midi_chan']=True
 
         self.preset = ""
         self.preset_config = None
-        print("I'm alive!")
-        #self.bank_dirs = [
-        #    ('_', self.my_data_dir + "/presets/puredata")
-        #]
-
-        #self.base_command=("/usr/bin/pd", "-jack", "-rt", "-alsamidi", "-mididev", "1", "-send", ";pd dsp 1")       
-        self.command=("/usr/bin/xev", "-rv")
-
-
+        
         self.start()
         self.reset()
 
@@ -84,22 +90,35 @@ class zynthian_engine_midiglue(zynthian_engine):
     def get_preset_list(self, bank):
         print('Getting Preset List for from bank:')
         print(bank)
-        # hacking something just for debug now
-        preset_list=[]
-        for i in range(0, 10):
-            path = ""
-            bank_msb = i
-            bank_lsb = 10+i
-            prg = 20+i
-            preset_list.append((path,[bank_msb,bank_lsb,prg],"preset" + str(i), i))
+        preset_list = self.sounds[bank[0]]
         print(preset_list)
-        return preset_list
-
-   
+        return preset_list   
 
     #----------------------------------------------------------------------------
     # Controllers Managament
     #----------------------------------------------------------------------------
+    #    def send_controller_value(self, zctrl):
+    #        print("change control")
+    #        val = zctrl.get_value()
+    #        print(val)
+    #        if val == 0:
+    #            return
+    #        if val > 64:
+    #            jackname = "KMidimon"
+    #        else:
+    #            jackname = "events-in"
+    #        if jackname != self.jackname:
+    #            self.jackname = jackname
+    #            print("switch to: " + jackname)
+    #            zynthian_engine_midiglue._ctrls=[
+    #                 ['volume',7,val],
+    #                 ['modulation',1,0],
+    #                 ['ctrl 2',2,0],
+    #                 ['ctrl 3',3,0]
+    #            ]
+    #            self.stop()
+    #            self.refresh_all()
+            
 
  
     #--------------------------------------------------------------------------

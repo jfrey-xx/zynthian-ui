@@ -1,9 +1,9 @@
-
+# -*- coding: utf-8 -*-
 
 from . import zynthian_engine
 
 #------------------------------------------------------------------------------
-# Puredata Engine Class
+# Passing by MIDI instrument selection
 #------------------------------------------------------------------------------
 
 class zynthian_engine_midiglue(zynthian_engine):
@@ -23,23 +23,6 @@ class zynthian_engine_midiglue(zynthian_engine):
         ['main',['volume','modulation','ctrl 2','ctrl 3']]
     ]
 
-    # first string: key to retrieve preset in sounds' dict, second string: how it is diplayed in the GUI
-    bank_list=[
-        ('Studio Set',1,'Studio Set'),
-        ('Supernatural',2,'Supernatural'),
-    ]
-    
-    sounds={
-            "Studio Set": [
-                ("",[85,64,1],"FA Preview"),
-                ("",[85,64,2],"Jazz Duo")
-            ],
-            "Supernatural": [
-                ("",[89,64,1],"Piano: Full Grand 1"),
-                ("",[85,64,21],"E.Piano: Phaser Dyno"),
-                ("",[85,64,89],"Ensemble Strings: StringsSect1"),
-            ]
-    }
 
     #----------------------------------------------------------------------------
     # Initialization
@@ -57,6 +40,14 @@ class zynthian_engine_midiglue(zynthian_engine):
         self.preset = ""
         self.preset_config = None
         
+        # location where data about midi banks should be stored
+        self.banks_dirs=[
+            ('EX', self.ex_data_dir + "/midiglue"),
+            ('MY', self.my_data_dir + "/midiglue"),
+            ('_', self.data_dir + "/midiglue")
+		]
+  
+        #self.command=("/usr/bin/xev", "-rv")
         self.start()
         self.reset()
 
@@ -76,27 +67,29 @@ class zynthian_engine_midiglue(zynthian_engine):
     #----------------------------------------------------------------------------
 
     def get_bank_list(self, layer=None):
-        return self.bank_list
+        # each CSV file in data directory is a bank
+        return self.get_filelist(self.banks_dirs,"csv")
 
-    #def set_bank(self, layer, bank):
-    #    print("Should set bank")
-    #   pass
-
+        #return self.bank_list
 
     #----------------------------------------------------------------------------
     # Preset Managament
     #----------------------------------------------------------------------------
 
     def get_preset_list(self, bank):
-        print('Getting Preset List for from bank:')
-        print(bank)
-        preset_list = self.sounds[bank[0]]
-        print(preset_list)
+        import csv
+        # open bank file, retrieve instruments
+        preset_list=[]
+        with open(bank[0], newline='\n') as csvfile:
+            bankreader = csv.DictReader(csvfile, delimiter=',', quotechar='"')
+            for row in bankreader:
+                preset_list.append(("",[row['MSB'],row['LSB'],row['PC']],row['name']))
         return preset_list   
 
     #----------------------------------------------------------------------------
     # Controllers Managament
     #----------------------------------------------------------------------------
+    #    # bad attempt at dynamically selcting output MIDI device, left because could inspire future work
     #    def send_controller_value(self, zctrl):
     #        print("change control")
     #        val = zctrl.get_value()
@@ -119,8 +112,6 @@ class zynthian_engine_midiglue(zynthian_engine):
     #            self.stop()
     #            self.refresh_all()
             
-
- 
     #--------------------------------------------------------------------------
     # Special
     #--------------------------------------------------------------------------

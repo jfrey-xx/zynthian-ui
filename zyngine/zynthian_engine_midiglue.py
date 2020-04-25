@@ -13,14 +13,34 @@ class zynthian_engine_midiglue(zynthian_engine):
     # ---------------------------------------------------------------------------
 
     _ctrls=[
-        ['volume',7,96],
+        ['volume',7,100],
         ['modulation',1,0],
-        ['ctrl 2',2,0],
-        ['ctrl 3',3,0]
+        ['pan',10,64],
+        ['portamento on/off',65,'off','off|on'],
+        ['portamento time',5,0],
+        ['resonance',71,64],
+        ['release time',72,64],
+        ['attack time',73,64],
+        ['cutoff',74,64],
+        ['decay time',75,64],
+        ['sustain on/off',64,'off','off|on'],
+        ['sostenuto on/off',66,'off','off|on'],
+        ['soft on/off',67,'off','off|on'],
+        ['vibrato rate',76,64],
+        ['vibrato depth',77,64],
+        ['vibrato delay',78,64],
+        ['effect 1 reverb',91,64],
+        ['effect 3 chorus',93,0]
     ]
 
+
     _ctrl_screens=[
-        ['main',['volume','modulation','ctrl 2','ctrl 3']]
+        ['main',['volume','modulation','pan']],
+        ['sound',['resonance', 'cutoff', 'effect 1 reverb', 'effect 3 chorus']],
+        ['pedals', ['sustain on/off', 'sostenuto on/off', 'soft on/off']],
+        ['portamento', ['portamento on/off', 'portamento time']],
+        ['vibrato', ['vibrato rate', 'vibrato depth', 'vibrato delay']],
+        ['envelope', ['attack time', 'decay time', 'release time']]
     ]
 
 

@@ -103,7 +103,7 @@ class zynthian_engine_midiglue(zynthian_engine):
         with open(bank[0], newline='\n') as csvfile:
             bankreader = csv.DictReader(csvfile, delimiter=',', quotechar='"')
             for row in bankreader:
-                preset_list.append(("",[row['MSB'],row['LSB'],row['PC']],row['name']))
+                preset_list.append(("",[int(row['MSB']),int(row['LSB']),int(row['PC'])],row['name']))
         return preset_list   
 
     #----------------------------------------------------------------------------

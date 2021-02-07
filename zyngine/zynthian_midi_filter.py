@@ -5,11 +5,11 @@
 #
 # Valid rule formats:
 # -------------------------------------
-#  IGNORE [CH#??] EV[#??]
-#  MAP [CH#??] EV[#??] => [CH#??] EV[#??]
-#  CLEAN [CH#??] EV[#??]
+#  IGNORE [CH#??] [EV[#??]]
+#  MAP [CH#??] [EV[#??]] => [CH#??] [EV[#??]]
+#  CLEAN [CH#??] [EV[#??]]
 #
-# Valid event types: 
+# Valid event types (EV): 
 # -------------------------------------
 #  NON => Note-On
 #  NOFF => Note-Off
@@ -21,7 +21,7 @@
 # 
 # Valid numeric expressions:
 # -------------------------------------
-#  5				=> a single number
+#  5			=> a single number
 #  5,6,7 		=> a list of numbers
 #  5:7			=> a range of numbers, including both limitters
 #  1,2,3:5	=> a mix of lists and ranges
@@ -54,13 +54,6 @@ sys.path.append(os.environ.get('ZYNTHIAN_UI_DIR'))
 
 # Zynthian specific modules
 from zyncoder import *
-
-#------------------------------------------------------------------------------
-# Configure logging
-#------------------------------------------------------------------------------
-
-# Set root logging level
-logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
 
 #------------------------------------------------------------------------------
 # Parser related classes
@@ -100,12 +93,17 @@ class MidiFilterArgs:
 			res.append(self.parse_arg(arg))
 
 		if n_args==1:
-			if args0 is None:
-				self.ch_list = range(0,16)
+			if res[0][0]=="CH":
+				self.ch_list = res[0][1]
+				self.ev_type = None
+				self.ev_list = None
 			else:
-				self.ch_list = args0.ch_list
-			self.ev_type = res[0][0]
-			self.ev_list = res[0][1]
+				if args0 is None:
+					self.ch_list = range(0,16)
+				else:
+					self.ch_list = args0.ch_list
+				self.ev_type = res[0][0]
+				self.ev_list = res[0][1]
 
 		elif n_args==2:
 			if res[0][0]!="CH":
@@ -114,7 +112,7 @@ class MidiFilterArgs:
 			self.ev_type = res[1][0]
 			self.ev_list = res[1][1]
 
-		if self.ev_type not in self.EVENT_TYPES:
+		if self.ev_type and self.ev_type not in self.EVENT_TYPES:
 			raise MidiFilterException("Invalid Event Type (%s)" % self.ev_type)
 
 
@@ -147,7 +145,7 @@ class MidiFilterArgs:
 		else:
 			values=[0]
 
-		return [parts[0],values]
+		return [arg_type, values]
 
 
 class MidiFilterRule:
@@ -168,8 +166,8 @@ class MidiFilterRule:
 		parts=rule.split()
 		self.rule_type=parts[0]
 
-		# IGNORE rule ...
-		if self.rule_type=="IGNORE" or self.rule_type=="CLEAN":
+		# IGNORE or CLEAN rule ...
+		if self.rule_type in ("IGNORE", "CLEAN"):
 			if len(parts)>3:
 				raise MidiFilterException("Invalid rule format. Too many parts.")
 			# Parse arguments
@@ -181,11 +179,26 @@ class MidiFilterRule:
 				# Parse arguments
 				self.args.append(MidiFilterArgs(parts[1:arrow_i]))
 				self.args.append(MidiFilterArgs(parts[arrow_i+1:],self.args[0]))
-				# Check consistency of rule lists
-				if len(self.args[0].ch_list)!=len(self.args[1].ch_list):
-					raise MidiFilterException("MAP rule channel lists can't be matched")
-				if len(self.args[1].ev_list)!=len(self.args[1].ev_list):
-					raise MidiFilterException("MAP rule event lists can't be matched")
+				
+				n0 = len(self.args[0].ch_list)
+				n1 = len(self.args[1].ch_list)
+				if n0>1 and n1==1:
+					self.args[1].ch_list = self.args[1].ch_list * n0
+				elif n0!=n1:
+					raise Exception("MAP rule channel lists can't be matched ({}=>{})".format(n0,n1))
+				logging.debug("Mapping {} channels to {} ...".format(n0, n1))
+
+				if self.args[0].ev_type is None and self.args[1].ev_type is None:
+					logging.debug("Mapping ALL events ...")
+				else:
+					m0 = len(self.args[0].ev_list)
+					m1 = len(self.args[1].ev_list)
+					if m1==1:
+						self.args[1].ev_list = self.args[1].ev_list * m0
+					elif m0!=m1:
+						raise Exception("MAP rule event lists can't be matched ({}=>{}".format(m0,m1))
+					logging.debug("Mapping {} events to {} ...".format(m0, m1))
+
 			except Exception as e:
 				raise MidiFilterException("Invalid MAP rule format (%s): %s" % (rule, e))
 		else:
@@ -197,38 +210,88 @@ class MidiFilterRule:
 
 	def set_rules(self, set_rules=True):
 		n_rules=0
-		if self.rule_type=="IGNORE" or self.rule_type=="CLEAN":
+		if self.rule_type in ("IGNORE", "CLEAN"):
+			if self.args[0].ev_type:
+				ev_types = [MidiFilterArgs.EVENT_TYPE_CODES[self.args[0].ev_type]]
+			else:
+				ev_types = MidiFilterArgs.EVENT_TYPE_CODES.values()
+
 			for ch in self.args[0].ch_list:
-				ev_type=MidiFilterArgs.EVENT_TYPE_CODES[self.args[0].ev_type]
-				for ev_num in self.args[0].ev_list:
-					n_rules += 1
-					logging.debug("%s CH#%s %s#%s" % (self.rule_type,ch,self.args[0].ev_type,ev_num))
-					if set_rules:
-						if self.rule_type=="IGNORE":
-							zyncoder.lib_zyncoder.set_midi_filter_event_ignore(ev_type, ch, ev_num)
-						elif self.rule_type=="CLEAN":
-							zyncoder.lib_zyncoder.del_midi_filter_event_map(ev_type, ch, ev_num)
+				for ev_type in ev_types:
+					if self.args[0].ev_list is None:
+						if ev_type not in (MidiFilterArgs.SINGLE_ARG_TYPES):
+							ev_list = range(0,128)
+						else:
+							ev_list=[0]
+					else:
+						ev_list = self.args[0].ev_list
+
+					for ev_num in ev_list:
+						n_rules += 1
+						logging.debug("%s CH#%s %s#%s" % (self.rule_type,ch,ev_type,ev_num))
+						if set_rules:
+							if self.rule_type=="IGNORE":
+								zyncoder.lib_zyncoder.set_midi_filter_event_ignore(ev_type, ch, ev_num)
+							elif self.rule_type=="CLEAN":
+								zyncoder.lib_zyncoder.del_midi_filter_event_map(ev_type, ch, ev_num)
+
 		elif self.rule_type=="MAP":
+			if self.args[0].ev_type and self.args[1].ev_type:
+				ev1_types = [MidiFilterArgs.EVENT_TYPE_CODES[self.args[0].ev_type]]
+				ev2_types = [MidiFilterArgs.EVENT_TYPE_CODES[self.args[1].ev_type]]
+			else:
+				ev1_types = ev2_types = MidiFilterArgs.EVENT_TYPE_CODES.values()
+
 			for ch1,ch2 in zip(self.args[0].ch_list,self.args[1].ch_list):
-				ev1_type=MidiFilterArgs.EVENT_TYPE_CODES[self.args[0].ev_type]
-				ev2_type=MidiFilterArgs.EVENT_TYPE_CODES[self.args[1].ev_type]
-				for ev1_num,ev2_num in zip(self.args[0].ev_list,self.args[1].ev_list):
-					n_rules += 1
-					logging.debug("MAP CH#%s %s#%s => CH#%s %s#%s" % (ch1,self.args[0].ev_type,ev1_num,ch2,self.args[1].ev_type,ev2_num))
-					if set_rules:
-						zyncoder.lib_zyncoder.set_midi_filter_event_map(ev1_type, ch1, ev1_num, ev2_type, ch2, ev2_num)
+				for ev1_type,ev2_type in zip(ev1_types,ev2_types):
+					if self.args[0].ev_list is None:
+						if ev1_type not in (MidiFilterArgs.SINGLE_ARG_TYPES):
+							ev1_list = range(0,128)
+						else:
+							ev1_list=[0]
+					else:
+						ev1_list = self.args[0].ev_list
+
+					if self.args[1].ev_list is None:
+						if ev2_type not in (MidiFilterArgs.SINGLE_ARG_TYPES):
+							ev2_list = range(0,128)
+						else:
+							ev2_list=[0]
+					else:
+						ev2_list = self.args[1].ev_list
+
+					for ev1_num,ev2_num in zip(ev1_list,ev2_list):
+						n_rules += 1
+						logging.debug("MAP CH#%s %s#%s => CH#%s %s#%s" % (ch1,ev1_type,ev1_num,ch2,ev2_type,ev2_num))
+						if set_rules:
+							zyncoder.lib_zyncoder.set_midi_filter_event_map(ev1_type, ch1, ev1_num, ev2_type, ch2, ev2_num)
+
 		return n_rules
 
 
 	def del_rules(self, del_rules=True):
 		n_rules=0
+		if self.args[0].ev_type:
+			ev_types = [MidiFilterArgs.EVENT_TYPE_CODES[self.args[0].ev_type]]
+		else:
+			ev_types = MidiFilterArgs.EVENT_TYPE_CODES.values()
+
 		for ch in self.args[0].ch_list:
-			ev_type=MidiFilterArgs.EVENT_TYPE_CODES[self.args[0].ev_type]
-			for ev_num in self.args[0].ev_list:
-				n_rules += 1
-				logging.debug("CLEAN CH#%s %s#%s" % (ch,self.args[0].ev_type,ev_num))
-				if del_rules:
-					zyncoder.lib_zyncoder.del_midi_filter_event_map(ev_type, ch, ev_num)
+			for ev_type in ev_types:
+				if self.args[0].ev_list is None:
+					if ev_type not in (MidiFilterArgs.SINGLE_ARG_TYPES):
+						ev_list = range(0,128)
+					else:
+						ev_list=[0]
+				else:
+					ev_list = self.args[0].ev_list
+
+				for ev_num in ev_list:
+					n_rules += 1
+					logging.debug("CLEAN CH#%s %s#%s" % (ch,ev_type,ev_num))
+					if del_rules:
+						zyncoder.lib_zyncoder.del_midi_filter_event_map(ev_type, ch, ev_num)
+
 		return n_rules
 
 
@@ -284,6 +347,8 @@ class TestMidiFilterRule(unittest.TestCase):
 
 	def test_ignore_rules(self):
 		#Good rules
+		mfr=MidiFilterRule("IGNORE CH#3", False)
+		self.assertTrue(mfr.set_rules()==128*7)
 		mfr=MidiFilterRule("IGNORE CH#3 CC#5", False)
 		self.assertTrue(mfr.set_rules()==1)
 		mfr=MidiFilterRule("IGNORE CH#3,5,7 PB", False)
@@ -300,11 +365,13 @@ class TestMidiFilterRule(unittest.TestCase):
 		with self.assertRaises(MidiFilterException):
 			MidiFilterRule("IGNORE CH#1,2,3:8 PB#7,8", False)
 		with self.assertRaises(MidiFilterException):
-			MidiFilterRule("IGNORE CH#1,2,3:8 KP#1:3", False)
+			MidiFilterRule("IGNORE CH#1,2,3:8 CP#1:3", False)
 
 
 	def test_map_rules(self):
 		#Good rules
+		mfr=MidiFilterRule("MAP CH#3 => CH#1", False)
+		self.assertTrue(mfr.set_rules()==128*7)
 		mfr=MidiFilterRule("MAP CH#1 CC#5 => CC#7", False)
 		self.assertTrue(mfr.set_rules()==1)
 		mfr=MidiFilterRule("MAP CH#3 CC#5 => CH#4 CC#7", False)
@@ -317,6 +384,8 @@ class TestMidiFilterRule(unittest.TestCase):
 		self.assertTrue(mfr.set_rules()==18)
 		mfr=MidiFilterRule("MAP CH#1,2,3:8 CC#1:3,7,8 => CH#5:10,11,12 CC#1,2,4:6", False)
 		self.assertTrue(mfr.set_rules()==40)
+		mfr=MidiFilterRule("MAP CH#0:15 CC#45 => CH#15 CC#76", False)
+		self.assertTrue(mfr.set_rules()==16)
 		#Bad rules
 		with self.assertRaises(MidiFilterException):
 			MidiFilterRule("MAP XH#1,2,3:8 PB#7,8 => JK#76", False)
@@ -327,5 +396,9 @@ class TestMidiFilterRule(unittest.TestCase):
 
 
 if __name__ == '__main__':
+	# Set root logging level
+	logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
+	logging.getLogger().setLevel(level=logging.DEBUG)
+
 	zyncoder.lib_zyncoder_init()
 	unittest.main()

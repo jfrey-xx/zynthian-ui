@@ -34,11 +34,9 @@ from . import zynthian_engine
 
 class zynthian_engine_setbfree(zynthian_engine):
 
-
 	# ---------------------------------------------------------------------------
 	# Banks
 	# ---------------------------------------------------------------------------
-
 
 	bank_manuals_list = [
 		['Upper', 0, 'Upper', '_', [False, False, 59]],
@@ -77,7 +75,6 @@ class zynthian_engine_setbfree(zynthian_engine):
 			osc.harmonic.9=0.012345679012345678
 			osc.harmonic.11=0.008264462809917356"""
 	}
-
 
 	# ---------------------------------------------------------------------------
 	# Controllers & Screens
@@ -168,11 +165,19 @@ class zynthian_engine_setbfree(zynthian_engine):
 		'overdrive_ogain': 'overdrive outputgain'
 	}
 
+	#----------------------------------------------------------------------------
+	# Config variables
+	#----------------------------------------------------------------------------
+
+	base_dir = zynthian_engine.data_dir + "/setbfree"
+	presets_fpath = base_dir + "/pgm/all.pgm"
+	config_tpl_fpath = base_dir + "/cfg/zynthian.cfg.tpl"
+	config_my_fpath = zynthian_engine.config_dir + "/setbfree/zynthian.cfg"
+	config_autogen_fpath = zynthian_engine.config_dir + "/setbfree/.autogen.cfg"
 
 	#----------------------------------------------------------------------------
 	# Initialization
 	#----------------------------------------------------------------------------
-
 
 	def __init__(self, zyngui=None):
 		super().__init__(zyngui)
@@ -182,18 +187,14 @@ class zynthian_engine_setbfree(zynthian_engine):
 
 		self.options['midi_chan']=False
 
-		self.base_dir = self.data_dir + "/setbfree"
-
 		self.manuals_config = None
 		self.tonewheel_model = None
 
 		#Process command ...
-		preset_fpath = self.base_dir + "/pgm/all.pgm"
-		config_fpath = self.base_dir + "/cfg/zynthian.cfg"
 		if self.config_remote_display():
-			self.command = "/usr/local/bin/setBfree -p \"{}\" -c \"{}\"".format(preset_fpath, config_fpath)
+			self.command = "setBfree -p \"{}\" -c \"{}\"".format(self.presets_fpath, self.config_autogen_fpath)
 		else:
-			self.command = "/usr/local/bin/setBfree -p \"{}\" -c \"{}\"".format(preset_fpath, config_fpath)
+			self.command = "setBfree -p \"{}\" -c \"{}\"".format(self.presets_fpath, self.config_autogen_fpath)
 
 		self.command_prompt = "\nAll systems go."
 
@@ -202,17 +203,14 @@ class zynthian_engine_setbfree(zynthian_engine):
 
 	def generate_config_file(self, midi_chans):
 		# Get user's config
-		my_cfg_fpath= self.my_data_dir + "/setbfree/cfg/zynthian.cfg"
 		try:
-			with open(my_cfg_fpath, 'r') as my_cfg_file:
+			with open(self.config_my_fpath, 'r') as my_cfg_file:
 				my_cfg_data=my_cfg_file.read()
 		except:
 			my_cfg_data=""
 
 		# Generate on-the-fly config
-		cfg_tpl_fpath = self.base_dir + "/cfg/zynthian.cfg.tpl"
-		cfg_fpath = self.base_dir + "/cfg/zynthian.cfg"
-		with open(cfg_tpl_fpath, 'r') as cfg_tpl_file:
+		with open(self.config_tpl_fpath, 'r') as cfg_tpl_file:
 			cfg_data = cfg_tpl_file.read()
 			cfg_data = cfg_data.replace('#OSC.TUNING#', str(self.zyngui.fine_tuning_freq))
 			cfg_data = cfg_data.replace('#MIDI.UPPER.CHANNEL#', str(1 + midi_chans[0]))
@@ -220,7 +218,7 @@ class zynthian_engine_setbfree(zynthian_engine):
 			cfg_data = cfg_data.replace('#MIDI.PEDALS.CHANNEL#', str(1 + midi_chans[2]))
 			cfg_data = cfg_data.replace('#TONEWHEEL.CONFIG#', self.tonewheel_config[self.tonewheel_model])
 			cfg_data += "\n" + my_cfg_data
-			with open(cfg_fpath, 'w') as cfg_file:
+			with open(self.config_autogen_fpath, 'w+') as cfg_file:
 				cfg_file.write(cfg_data)
 
 
@@ -228,16 +226,13 @@ class zynthian_engine_setbfree(zynthian_engine):
 	# Layer Management
 	# ---------------------------------------------------------------------------
 
-
 	# ---------------------------------------------------------------------------
 	# MIDI Channel Management
 	# ---------------------------------------------------------------------------
 
-
 	#----------------------------------------------------------------------------
 	# Bank Managament
 	#----------------------------------------------------------------------------
-
 
 	def get_bank_list(self, layer):
 		if not self.manuals_config:
@@ -266,8 +261,8 @@ class zynthian_engine_setbfree(zynthian_engine):
 			self.tonewheel_model = bank[0]
 
 		if not self.proc:
-			midi_chans = [self.layers[0].get_midi_chan(), 15, 15]
-			free_chans = self.zyngui.screens['layer'].get_free_midi_chans()
+			ch = self.layers[0].get_midi_chan()
+			midi_chans = [ch, 15, 15]
 
 			logging.info("Upper Layer in chan {}".format(midi_chans[0]))
 			self.layers[0].bank_name = "Upper"
@@ -277,8 +272,7 @@ class zynthian_engine_setbfree(zynthian_engine):
 			# Extra layers
 			if self.manuals_config[4][0]:
 				try:
-					# Adding Lower Manual Layer
-					midi_chans[1] = free_chans.pop(0)
+					ch = midi_chans[1] = self.zyngui.screens['layer'].get_next_free_midi_chan(ch)
 					logging.info("Lower Manual Layer in chan {}".format(midi_chans[1]))
 					self.zyngui.screens['layer'].add_layer_midich(midi_chans[1], False)
 					self.layers[1].bank_name = "Lower"
@@ -291,7 +285,7 @@ class zynthian_engine_setbfree(zynthian_engine):
 			if self.manuals_config[4][1]:
 				try:
 					# Adding Pedal Layer
-					midi_chans[2] = free_chans.pop(0)
+					midi_chans[2] = self.zyngui.screens['layer'].get_next_free_midi_chan(ch)
 					logging.info("Pedal Layer in chan {}".format(midi_chans[2]))
 					self.zyngui.screens['layer'].add_layer_midich(midi_chans[2], False)
 					i=len(self.layers)-1
@@ -306,7 +300,8 @@ class zynthian_engine_setbfree(zynthian_engine):
 			logging.debug("STARTING SETBFREE!!")
 			self.generate_config_file(midi_chans)
 			self.start()
-			self.zyngui.zynautoconnect(True)
+			self.zyngui.zynautoconnect_midi(True)
+			self.zyngui.zynautoconnect_audio()
 
 			midi_prog = self.manuals_config[4][2]
 			if midi_prog and isinstance(midi_prog, int):
@@ -317,10 +312,11 @@ class zynthian_engine_setbfree(zynthian_engine):
 
 			return True
 
+
+
 	#----------------------------------------------------------------------------
 	# Preset Managament
 	#----------------------------------------------------------------------------
-
 
 	def get_preset_list(self, bank):
 		logging.debug("Preset List for Bank {}".format(bank[0]))
@@ -370,7 +366,7 @@ class zynthian_engine_setbfree(zynthian_engine):
 				zctrl.set_value(v, True)
 
 				#Refresh GUI controller in screen when needed ...
-				if self.zyngui.active_screen=='control' and self.zyngui.screens['control'].mode=='control':
+				if self.zyngui.active_screen=='control' and not self.zyngui.modal_screen:
 					self.zyngui.screens['control'].set_controller_value(zctrl)
 
 			except Exception as e:
@@ -384,17 +380,15 @@ class zynthian_engine_setbfree(zynthian_engine):
 				#logging.debug("MIDI CC {} -> '{}' = {}".format(zctrl.midi_cc, zctrl.name, val))
 
 				#Refresh GUI controller in screen when needed ...
-				if self.zyngui.active_screen=='control' and self.zyngui.screens['control'].mode=='control':
+				if self.zyngui.active_screen=='control' and not self.zyngui.modal_screen:
 					self.zyngui.screens['control'].set_controller_value(zctrl)
 
 		except Exception as e:
 			logging.debug(e)
 
-
 	#----------------------------------------------------------------------------
 	# Specific functionality
 	#----------------------------------------------------------------------------
-
 
 	def get_chan_name(self, chan):
 		try:
@@ -412,7 +406,6 @@ class zynthian_engine_setbfree(zynthian_engine):
 
 
 	def load_program_list(self,fpath):
-		self.start_loading()
 		pgm_list=None
 		try:
 			with open(fpath) as f:
@@ -461,7 +454,7 @@ class zynthian_engine_setbfree(zynthian_engine):
 								del params['drawbars']
 
 							#Add program to list
-							pgm_list.append((i,[0,0,prg],title,params))
+							pgm_list.append([i,[0,0,prg],title,params])
 							i=i+1
 					except:
 						#print("Ignored line: %s" % line)
@@ -471,14 +464,11 @@ class zynthian_engine_setbfree(zynthian_engine):
 			pgm_list=None
 			logging.error("Getting program info from %s => %s" % (fpath,err))
 
-		self.stop_loading()
 		return pgm_list
-
 
 	# ---------------------------------------------------------------------------
 	# Extended Config
 	# ---------------------------------------------------------------------------
-
 
 	def get_extended_config(self):
 		xconfig = { 
@@ -492,15 +482,12 @@ class zynthian_engine_setbfree(zynthian_engine):
 		try:
 			self.manuals_config = xconfig['manuals_config']
 			self.tonewheel_model = xconfig['tonewheel_model']
-
 		except Exception as e:
 			logging.error("Can't setup extended config => {}".format(e))
-
 
 	# ---------------------------------------------------------------------------
 	# Layer "Path" String
 	# ---------------------------------------------------------------------------
-
 
 	def get_path(self, layer):
 		path = self.nickname

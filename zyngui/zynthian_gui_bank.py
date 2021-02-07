@@ -31,30 +31,35 @@ from . import zynthian_gui_config
 from . import zynthian_gui_selector
 
 #------------------------------------------------------------------------------
-# Configure logging
-#------------------------------------------------------------------------------
-
-# Set root logging level
-logging.basicConfig(stream=sys.stderr, level=zynthian_gui_config.log_level)
-
-#------------------------------------------------------------------------------
 # Zynthian Bank Selection GUI Class
 #------------------------------------------------------------------------------
 
 class zynthian_gui_bank(zynthian_gui_selector):
 
+	buttonbar_config = [
+		(1, 'BACK'),
+		(0, 'LAYER'),
+		(2, 'FAVS'),
+		(3, 'SELECT')
+	]
 
 	def __init__(self):
 		super().__init__('Bank', True)
 
     
 	def fill_list(self):
+		if not self.zyngui.curlayer:
+			logging.error("Can't fill bank list for None layer!")
+			return
 		self.zyngui.curlayer.load_bank_list()
 		self.list_data=self.zyngui.curlayer.bank_list
 		super().fill_list()
 
 
 	def show(self):
+		if not self.zyngui.curlayer:
+			logging.error("Can't show bank list for None layer!")
+			return
 		self.index=self.zyngui.curlayer.get_bank_index()
 		logging.debug("BANK INDEX => %s" % self.index)
 		super().show()
@@ -62,6 +67,7 @@ class zynthian_gui_bank(zynthian_gui_selector):
 
 	def select_action(self, i, t='S'):
 		if self.zyngui.curlayer.set_bank(i):
+			self.zyngui.screens['preset'].disable_only_favs()
 			self.zyngui.show_screen('preset')
 			# If there is only one preset, jump to instrument control
 			if len(self.zyngui.curlayer.preset_list)<=1:

@@ -33,15 +33,6 @@ from . import zynthian_gui_config
 from . import zynthian_gui_selector
 from . import zynthian_gui_controller
 
-
-#------------------------------------------------------------------------------
-# Configure logging
-#------------------------------------------------------------------------------
-
-# Set root logging level
-logging.basicConfig(stream=sys.stderr, level=zynthian_gui_config.log_level)
-
-
 #------------------------------------------------------------------------------
 # Zynthian Sub-SnapShot (ZS3) MIDI-learn GUI Class
 #------------------------------------------------------------------------------
@@ -50,18 +41,25 @@ class zynthian_gui_zs3_learn(zynthian_gui_selector):
 
 	def __init__(self):
 		super().__init__('Program', True)
+		self.num_programs = 0
 
 
 	def fill_list(self):
 		self.list_data=[]
 
 		#Add list of programs
-		midich=self.zyngui.curlayer.get_midi_chan()
-		zs3_indexes=self.zyngui.screens['layer'].get_midi_chan_zs3_used_indexes(midich)
-		self.num_programs=len(zs3_indexes)
-		for i, zs3_index in enumerate(zs3_indexes):
-			zs3_title="Program {}".format(zs3_index)
-			self.list_data.append((zs3_index,len(self.list_data),zs3_title))
+		try:
+			midich=self.zyngui.curlayer.get_midi_chan()
+			zs3_indexes=self.zyngui.screens['layer'].get_midi_chan_zs3_used_indexes(midich)
+			select_zs3_idx = self.zyngui.screens['layer'].get_last_zs3_index(midich)
+			self.num_programs=len(zs3_indexes)
+			for i, zs3_index in enumerate(zs3_indexes):
+				zs3_title="Program {}".format(zs3_index)
+				self.list_data.append((zs3_index,len(self.list_data),zs3_title))
+				if zs3_index == select_zs3_idx:
+					self.index = len(self.list_data) - 1
+		except Exception as e:
+			logging.error(e)
 
 		#Add "Waiting for Program Change" message
 		if len(self.list_data)>0:
@@ -92,11 +90,15 @@ class zynthian_gui_zs3_learn(zynthian_gui_selector):
 
 	def select_action(self, i, t='S'):
 		self.index=i
-		preset_index=self.list_data[self.index][0]
-		if isinstance(preset_index, int):
+		zs3_index=self.list_data[self.index][0]
+		if isinstance(zs3_index, int):
 			midich=self.zyngui.curlayer.get_midi_chan()
-			self.zyngui.screens['layer'].set_midi_chan_zs3(midich, preset_index)
-			self.zyngui.exit_midi_learn_mode()
+			if t=='S':
+				self.zyngui.screens['layer'].set_midi_chan_zs3(midich, zs3_index)
+				self.zyngui.exit_midi_learn_mode()
+			elif t=='B':
+				self.zyngui.screens['zs3_options'].config(midich, zs3_index)
+				self.zyngui.show_modal('zs3_options')
 
 
 	def back_action(self):

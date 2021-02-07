@@ -24,8 +24,10 @@
 
 import os
 import re
+import glob
 import logging
 import socket
+import shutil
 from time import sleep
 from os.path import isfile, isdir
 from subprocess import check_output
@@ -56,23 +58,38 @@ class zynthian_engine_linuxsampler(zynthian_engine):
 		['volume',7,96],
 		['pan',10,64],
 		['sustain',64,'off',['off','on']],
-		['portamento on/off',65,'off','off|on'],
-		['portamento time',5,64],
-		['sostenuto',66,64],
-		['poly on/off',127,'off','off|on']
+		['sostenuto',66,'off',['off','on']],
+		['legato on/off',68,'off',['off','on']],
+		['portamento on/off',65,'off',['off','on']],
+		['portamento time-coarse',5,0],
+		['portamento time-fine',37,0]
 	]
 
 	# Controller Screens
 	_ctrl_screens=[
-		['main',['volume','pan','portamento on/off','sustain']]
-		#['portamento',['volume','poly on/off','sostenuto','portamento time']]
+		['main',['volume','sostenuto','pan','sustain']],
+		['portamento',['legato on/off','portamento on/off','portamento time-coarse','portamento time-fine']]
 	]
 
+	# ---------------------------------------------------------------------------
+	# Config variables
+	# ---------------------------------------------------------------------------
+
+	lscp_port = 6688
+	lscp_v1_6_supported=False
+
+	bank_dirs = [
+		('ExSFZ', zynthian_engine.ex_data_dir + "/soundfonts/sfz"),
+		('ExGIG', zynthian_engine.ex_data_dir + "/soundfonts/gig"),
+		('MySFZ', zynthian_engine.my_data_dir + "/soundfonts/sfz"),
+		('MyGIG', zynthian_engine.my_data_dir + "/soundfonts/gig"),
+		('SFZ', zynthian_engine.data_dir + "/soundfonts/sfz"),
+		('GIG', zynthian_engine.data_dir + "/soundfonts/gig")
+	]
 
 	# ---------------------------------------------------------------------------
 	# Initialization
 	# ---------------------------------------------------------------------------
-
 
 	def __init__(self, zyngui=None):
 		super().__init__(zyngui)
@@ -81,22 +98,11 @@ class zynthian_engine_linuxsampler(zynthian_engine):
 		self.jackname = "LinuxSampler"
 
 		self.sock = None
-		self.port = 6688
-		self.command = "linuxsampler --lscp-port {}".format(self.port)
+		self.command = "linuxsampler --lscp-port {}".format(self.lscp_port)
 		self.command_prompt = "\nLinuxSampler initialization completed."
 
 		self.ls_chans = {}
 
-		self.lscp_dir = self.data_dir + "/lscp"
-		self.bank_dirs = [
-			('ExSFZ', self.ex_data_dir + "/soundfonts/sfz"),
-			('ExGIG', self.ex_data_dir + "/soundfonts/gig"),
-			('MySFZ', self.my_data_dir + "/soundfonts/sfz"),
-			('MyGIG', self.my_data_dir + "/soundfonts/gig"),
-			('SFZ', self.data_dir + "/soundfonts/sfz"),
-			('GIG', self.data_dir + "/soundfonts/gig")
-		]
-		self.lscp_v1_6_supported=False
 		self.start()
 		self.lscp_connect()
 		self.lscp_get_version()
@@ -108,11 +114,9 @@ class zynthian_engine_linuxsampler(zynthian_engine):
 		self.ls_chans={}
 		self.ls_init()
 
-
 	# ---------------------------------------------------------------------------
 	# Subproccess Management & IPC
 	# ---------------------------------------------------------------------------
-
 
 	def lscp_connect(self):
 		logging.info("Connecting with LinuxSampler Server...")
@@ -122,7 +126,7 @@ class zynthian_engine_linuxsampler(zynthian_engine):
 		i=0
 		while i<20:
 			try:
-				self.sock.connect(("127.0.0.1",self.port))
+				self.sock.connect(("127.0.0.1",self.lscp_port))
 				break
 			except:
 				sleep(0.25)
@@ -157,7 +161,6 @@ class zynthian_engine_linuxsampler(zynthian_engine):
 
 
 	def lscp_send_single(self, command):
-		self.start_loading()
 		#logging.debug("LSCP SEND => %s" % command)
 		command=command+"\r\n"
 		try:
@@ -179,12 +182,10 @@ class zynthian_engine_linuxsampler(zynthian_engine):
 			parts=line.split(':')
 			self.stop_loading()
 			raise zyngine_lscp_warning("{} ({} {})".format(parts[2],parts[0],parts[1]))
-		self.stop_loading()
 		return result
 
 
 	def lscp_send_multi(self, command):
-		self.start_loading()
 		#logging.debug("LSCP SEND => %s" % command)
 		command=command+"\r\n"
 		try:
@@ -211,17 +212,15 @@ class zynthian_engine_linuxsampler(zynthian_engine):
 			elif len(line)>3:
 				parts=line.split(':')
 				result[parts[0]]=parts[1]
-		self.stop_loading()
 		return result
-
 
 	# ---------------------------------------------------------------------------
 	# Layer Management
 	# ---------------------------------------------------------------------------
 
-
 	def add_layer(self, layer):
-		super().add_layer(layer)
+		self.layers.append(layer)
+		layer.jackname = None
 		layer.ls_chan_info=None
 		self.ls_set_channel(layer)
 		self.set_midi_chan(layer)
@@ -237,7 +236,6 @@ class zynthian_engine_linuxsampler(zynthian_engine):
 	# MIDI Channel Management
 	# ---------------------------------------------------------------------------
 
-
 	def set_midi_chan(self, layer):
 		if layer.ls_chan_info:
 			ls_chan_id=layer.ls_chan_info['chan_id']
@@ -252,7 +250,6 @@ class zynthian_engine_linuxsampler(zynthian_engine):
 	# Bank Management
 	# ---------------------------------------------------------------------------
 
-
 	def get_bank_list(self, layer=None):
 		return self.get_dirlist(self.bank_dirs)
 
@@ -260,22 +257,18 @@ class zynthian_engine_linuxsampler(zynthian_engine):
 	def set_bank(self, layer, bank):
 		return True
 
-
 	# ---------------------------------------------------------------------------
 	# Preset Management
 	# ---------------------------------------------------------------------------
 
-
-	_exclude_sfz = re.compile(r"[MOPRSTV][1-9]?l?\.sfz")
-
-
-	def get_preset_list(self, bank):
-		self.start_loading()
+	@staticmethod
+	def _get_preset_list(bank):
 		logging.info("Getting Preset List for %s" % bank[2])
 		i=0
 		preset_list=[]
 		preset_dpath=bank[0]
 		if os.path.isdir(preset_dpath):
+			exclude_sfz = re.compile(r"[MOPRSTV][1-9]?l?\.sfz")
 			cmd="find '"+preset_dpath+"' -maxdepth 3 -type f -name '*.sfz'"
 			output=check_output(cmd, shell=True).decode('utf8')
 			cmd="find '"+preset_dpath+"' -maxdepth 2 -type f -name '*.gig'"
@@ -284,18 +277,22 @@ class zynthian_engine_linuxsampler(zynthian_engine):
 			for f in lines:
 				if f:
 					filehead,filetail=os.path.split(f)
-					if not self._exclude_sfz.fullmatch(filetail):
+					if not exclude_sfz.fullmatch(filetail):
 						filename,filext=os.path.splitext(f)
-						title=filename[len(preset_dpath)+1:].replace('_', ' ')
+						filename = filename[len(preset_dpath)+1:]
+						title=filename.replace('_', ' ')
 						engine=filext[1:].lower()
-						preset_list.append((i,[0,0,0],title,f,engine))
+						preset_list.append([f,i,title,engine,"{}.{}".format(filename,filext)])
 						i=i+1
-		self.stop_loading()
 		return preset_list
 
 
+	def get_preset_list(self, bank):
+		return self._get_preset_list(bank)
+
+
 	def set_preset(self, layer, preset, preload=False):
-		if self.ls_set_preset(layer, preset[4], preset[3]):
+		if self.ls_set_preset(layer, preset[3], preset[0]):
 			layer.send_ctrl_midi_cc()
 			return True
 		else:
@@ -304,13 +301,12 @@ class zynthian_engine_linuxsampler(zynthian_engine):
 
 	def cmp_presets(self, preset1, preset2):
 		try:
-			if preset1[3]==preset2[3] and preset1[4]==preset2[4]:
+			if preset1[0]==preset2[0] and preset1[3]==preset2[3]:
 				return True
 			else:
 				return False
 		except:
 			return False
-
 
 	# ---------------------------------------------------------------------------
 	# Controllers Management
@@ -320,7 +316,6 @@ class zynthian_engine_linuxsampler(zynthian_engine):
 	# ---------------------------------------------------------------------------
 	# Specific functions
 	# ---------------------------------------------------------------------------
-
 
 	def ls_init(self):
 		try:
@@ -396,7 +391,8 @@ class zynthian_engine_linuxsampler(zynthian_engine):
 					self.lscp_send_single("SET CHANNEL AUDIO_OUTPUT_CHANNEL {} 1 {}".format(ls_chan_id, i*2+1))
 					layer.ls_chan_info['audio_output']=i
 
-					layer.jackname = "{}:CH{}".format(self.jackname, i)
+					layer.jackname = "{}:CH{}_".format(self.jackname, i)
+					self.zyngui.zynautoconnect_audio()
 
 				except zyngine_lscp_error as err:
 					logging.error(err)
@@ -447,5 +443,140 @@ class zynthian_engine_linuxsampler(zynthian_engine):
 			if not busy:
 				return i
 
+	# ---------------------------------------------------------------------------
+	# API methods
+	# ---------------------------------------------------------------------------
+
+	@classmethod
+	def zynapi_get_banks(cls):
+		bank_dirs = [
+			('SFZ', zynthian_engine.my_data_dir + "/soundfonts/sfz"),
+			('GIG', zynthian_engine.my_data_dir + "/soundfonts/gig")
+		]
+		banks=[]
+		for b in cls.get_dirlist(cls.bank_dirs, False):
+			banks.append({
+				'text': b[2],
+				'name': b[4],
+				'fullpath': b[0],
+				'raw': b,
+				'readonly': False
+			})
+		return banks
+
+
+	@classmethod
+	def zynapi_get_presets(cls, bank):
+		presets=[]
+		for p in cls._get_preset_list(bank['raw']):
+			head, tail = os.path.split(p[2])
+			presets.append({
+				'text': p[4],
+				'name': tail,
+				'fullpath': p[0],
+				'raw': p,
+				'readonly': False
+			})
+		return presets
+
+
+	@classmethod
+	def zynapi_new_bank(cls, bank_name):
+		if bank_name.lower().startswith("gig/"):
+			bank_type = "gig"
+			bank_name = bank_name[4:]
+		elif bank_name.lower().startswith("sfz/"):
+			bank_type = "sfz"
+			bank_name = bank_name[4:]
+		else:
+			bank_type = "sfz"
+		os.mkdir(zynthian_engine.my_data_dir + "/soundfonts/{}/{}".format(bank_type, bank_name))
+
+
+	@classmethod
+	def zynapi_rename_bank(cls, bank_path, new_bank_name):
+		head, tail = os.path.split(bank_path)
+		new_bank_path = head + "/" + new_bank_name
+		os.rename(bank_path, new_bank_path)
+
+
+	@classmethod
+	def zynapi_remove_bank(cls, bank_path):
+		shutil.rmtree(bank_path)
+
+
+	@classmethod
+	def zynapi_rename_preset(cls, preset_path, new_preset_name):
+		head, tail = os.path.split(preset_path)
+		fname, ext = os.path.splitext(tail)
+		new_preset_path = head + "/" + new_preset_name + ext
+		os.rename(preset_path, new_preset_path)
+
+
+	@classmethod
+	def zynapi_remove_preset(cls, preset_path):
+		os.remove(preset_path)
+		#TODO => If last preset in SFZ dir, delete it too!
+
+
+	@classmethod
+	def zynapi_download(cls, fullpath):
+		fname, ext = os.path.splitext(fullpath)
+		if ext[0]=='.':
+			head, tail = os.path.split(fullpath)
+			return head
+		else:
+			return fullpath
+
+
+	@classmethod
+	def zynapi_install(cls, dpath, bank_path):
+		#TODO: Test that bank_path fits preset type (sfz/gig)
+		 
+		fname, ext = os.path.splitext(dpath)
+		if os.path.isdir(dpath):
+			# Locate sfz files and move all them to first level directory
+			try:
+				sfz_files = check_output("find \"{}\" -type f -iname *.sfz".format(dpath), shell=True).decode("utf-8").split("\n")
+				# Find the "shallower" SFZ file 
+				shallower_sfz_file = sfz_files[0]
+				for f in sfz_files:
+					if len(f)<len(shallower_sfz_file):
+						shallower_sfz_file = f
+				head, tail = os.path.split(shallower_sfz_file)
+				# Move SFZ stuff to the top level
+				if head!=dpath:
+					for f in glob.glob(head + "/*"):
+						shutil.move(f, dpath)
+					#shutil.rmtree(head)
+			except:
+				raise Exception("Directory doesn't contain any SFZ file")
+
+			# Move directory to destiny bank
+			if "/sfz/" in bank_path:
+				shutil.move(dpath, bank_path)
+			else:
+				raise Exception("Destiny is not a SFZ bank!")
+
+		elif ext.lower()=='.gig':
+
+			# Move directory to destiny bank
+			if "/gig/" in bank_path:
+				shutil.move(dpath, bank_path)
+			else:
+				raise Exception("Destiny is not a GIG bank!")
+
+		else:
+			raise Exception("File doesn't look like a SFZ or GIG soundfont")
+
+
+	@classmethod
+	def zynapi_get_formats(cls):
+		return "gig,zip,tgz,tar.gz,tar.bz2"
+
+
+	@classmethod
+	def zynapi_martifact_formats(cls):
+		return "sfz,gig"
 
 #******************************************************************************

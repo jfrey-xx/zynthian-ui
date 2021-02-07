@@ -26,8 +26,10 @@ import os
 import re
 import logging
 import liblo
+import shutil
 from time import sleep
 from os.path import isfile, join
+from subprocess import check_output
 from . import zynthian_engine
 
 #------------------------------------------------------------------------------
@@ -87,11 +89,19 @@ class zynthian_engine_zynaddsubfx(zynthian_engine):
 		['depth',['volume','panning depth','filter.cutoff depth','filter.Q depth']]
 	]
 
+	#----------------------------------------------------------------------------
+	# Config variables
+	#----------------------------------------------------------------------------
+
+	bank_dirs = [
+		('EX', zynthian_engine.ex_data_dir + "/presets/zynaddsubfx"),
+		('MY', zynthian_engine.my_data_dir + "/presets/zynaddsubfx"),
+		('_', zynthian_engine.data_dir + "/zynbanks")
+	]
 
 	#----------------------------------------------------------------------------
 	# Initialization
 	#----------------------------------------------------------------------------
-
 
 	def __init__(self, zyngui=None):
 		super().__init__(zyngui)
@@ -100,21 +110,27 @@ class zynthian_engine_zynaddsubfx(zynthian_engine):
 		self.jackname = "zynaddsubfx"
 
 		self.osc_target_port = 6693
-	
+
+		try:
+			self.sr = int(self.zyngui.get_jackd_samplerate())
+		except Exception as e:
+			logging.error(e)
+			self.sr = 44100
+
+		try:
+			self.bs = int(self.zyngui.get_jackd_blocksize())
+		except Exception as e:
+			logging.error(e)
+			self.bs = 256
+
 		if self.config_remote_display():
-			self.command = "/usr/bin/zynaddsubfx -O jack-multi -I jack -P {} -a".format(self.osc_target_port)
+			self.command = "zynaddsubfx -r {} -b {} -O jack-multi -I jack -P {} -a".format(self.sr, self.bs, self.osc_target_port)
 		else:
-			self.command = "/usr/bin/zynaddsubfx -O jack-multi -I jack -P {} -a -U".format(self.osc_target_port)
+			self.command = "zynaddsubfx -r {} -b {} -O jack-multi -I jack -P {} -a -U".format(self.sr, self.bs, self.osc_target_port)
 
 		self.command_prompt = "\n\\[INFO] Main Loop..."
 
-		self.bank_dirs = [
-			('EX', self.ex_data_dir + "/presets/zynaddsubfx"),
-			('MY', self.my_data_dir + "/presets/zynaddsubfx"),
-			('_', self.data_dir + "/zynbanks")
-		]
 		self.osc_paths_data = []
-
 		self.current_slot_zctrl = None
 		self.slot_zctrls = {}
 
@@ -127,7 +143,6 @@ class zynthian_engine_zynaddsubfx(zynthian_engine):
 		super().reset()
 		self.disable_all_parts()
 
-
 	# ---------------------------------------------------------------------------
 	# Layer Management
 	# ---------------------------------------------------------------------------
@@ -135,7 +150,7 @@ class zynthian_engine_zynaddsubfx(zynthian_engine):
 	def add_layer(self, layer):
 		self.layers.append(layer)
 		layer.part_i = self.get_free_parts()[0]
-		layer.jackname = "{}:part{}".format(self.jackname, layer.part_i)
+		layer.jackname = "{}:part{}/".format(self.jackname, layer.part_i)
 		logging.debug("ADD LAYER => Part {} ({})".format(layer.part_i, self.jackname))
 
 
@@ -145,32 +160,27 @@ class zynthian_engine_zynaddsubfx(zynthian_engine):
 		layer.part_i = None
 		layer.jackname = None
 
-
 	# ---------------------------------------------------------------------------
 	# MIDI Channel Management
 	# ---------------------------------------------------------------------------
-
 
 	def set_midi_chan(self, layer):
 		if layer.part_i is not None:
 			liblo.send(self.osc_target, "/part%d/Prcvchn" % layer.part_i, layer.get_midi_chan())
 
-
 	#----------------------------------------------------------------------------
 	# Bank Managament
 	#----------------------------------------------------------------------------
 
-
 	def get_bank_list(self, layer=None):
 		return self.get_dirlist(self.bank_dirs)
-
 
 	#----------------------------------------------------------------------------
 	# Preset Managament
 	#----------------------------------------------------------------------------
 
-
-	def get_preset_list(self, bank):
+	@staticmethod
+	def _get_preset_list(bank):
 		preset_list=[]
 		preset_dir=bank[0]
 		index=0
@@ -188,8 +198,12 @@ class zynthian_engine_zynaddsubfx(zynthian_engine):
 				bank_lsb=int(index/128)
 				bank_msb=bank[1]
 				prg=index%128
-				preset_list.append((preset_fpath,[bank_msb,bank_lsb,prg],title,ext))
+				preset_list.append([preset_fpath,[bank_msb,bank_lsb,prg],title,ext,f])
 		return preset_list
+
+
+	def get_preset_list(self, bank):
+		return self._get_preset_list(bank)
 
 
 	def set_preset(self, layer, preset, preload=False):
@@ -226,11 +240,9 @@ class zynthian_engine_zynaddsubfx(zynthian_engine):
 		except:
 			return False
 
-
 	# ---------------------------------------------------------------------------
 	# Specific functions
 	# ---------------------------------------------------------------------------
-
 
 	def get_free_parts(self):
 		free_parts=list(range(0,16))
@@ -264,32 +276,36 @@ class zynthian_engine_zynaddsubfx(zynthian_engine):
 		for i in range(0,16):
 			self.disable_part(i)
 
-
 	#----------------------------------------------------------------------------
 	# OSC Managament
 	#----------------------------------------------------------------------------
 
-
 	def osc_add_methods(self):
-			self.osc_server.add_method("/volume", 'i', self.cb_osc_load_preset)
-			#self.osc_server.add_method("/paths", None, self.cb_osc_paths)
-			self.osc_server.add_method("/automate/active-slot", 'i', self.cb_osc_automate_active_slot)
-			for i in range(0,16):
-				self.osc_server.add_method("/automate/slot%d/midi-cc" % i, 'i', self.cb_osc_automate_slot_midi_cc)
-			#self.osc_server.add_method(None, 'i', self.zyngui.cb_osc_ctrl)
-			#super().osc_add_methods()
+		self.osc_server.add_method("/volume", 'i', self.cb_osc_load_preset)
+		#self.osc_server.add_method("/paths", None, self.cb_osc_paths)
+		#self.osc_server.add_method("/automate/active-slot", 'i', self.cb_osc_automate_active_slot)
+		#for i in range(0,16):
+			#self.osc_server.add_method("/automate/slot%d/midi-cc" % i, 'i', self.cb_osc_automate_slot_midi_cc)
+		#self.osc_server.add_method(None, 'i', self.zyngui.cb_osc_ctrl)
+		#super().osc_add_methods()
 
 
 	def cb_osc_load_preset(self, path, args):
 		self.stop_loading()
 
 
-	#----------------------------------------------------------------------------
-	# MIDI learning
-	#----------------------------------------------------------------------------
+	def send_controller_value(self, zctrl):
+		if zctrl.osc_path:
+			liblo.send(self.osc_target,zctrl.osc_path, zctrl.get_ctrl_osc_val())
+		else:
+			raise Exception("NO OSC CONTROLLER")
 
 
-	def init_midi_learn(self, zctrl):
+	#----------------------------------------------------------------------------
+	# ZynAddSubFX Native MIDI learning => Deprecated!
+	#----------------------------------------------------------------------------
+
+	def XXX_init_midi_learn(self, zctrl):
 		if zctrl.osc_path:
 			# Set current learning-slot zctrl
 			logging.info("Learning '%s' ..." % zctrl.osc_path)
@@ -302,7 +318,7 @@ class zynthian_engine_zynaddsubfx(zynthian_engine):
 			self.osc_server.add_method(zctrl.osc_path, 'i', self.cb_osc_param_change)
 
 
-	def midi_unlearn(self, zctrl):
+	def XXX_midi_unlearn(self, zctrl):
 		if zctrl.osc_path in self.slot_zctrls:
 			logging.info("Unlearning '%s' ..." % zctrl.osc_path)
 			try:
@@ -316,7 +332,7 @@ class zynthian_engine_zynaddsubfx(zynthian_engine):
 				logging.warning("Can't Clear Automate Slot %s => %s" % (zctrl.osc_path,e))
 
 
-	def set_midi_learn(self, zctrl, chan, cc):
+	def XXX_set_midi_learn(self, zctrl, chan, cc):
 		try:
 			if zctrl.osc_path and zctrl.slot_i is not None and chan is not None and cc is not None:
 				logging.info("Set Automate Slot %d: %s => %d, %d" % (zctrl.slot_i, zctrl.osc_path, chan, cc))
@@ -333,14 +349,14 @@ class zynthian_engine_zynaddsubfx(zynthian_engine):
 			return zctrl._unset_midi_learn()
 
 
-	def reset_midi_learn(self):
+	def XXX_reset_midi_learn(self):
 		logging.info("Reset MIDI-learn ...")
 		liblo.send(self.osc_target, "/automate/clear", "*")
 		self.current_slot_zctrl=None
 		self.slot_zctrls={}
 
 
-	def cb_osc_automate_active_slot(self, path, args, types, src):
+	def XXX_cb_osc_automate_active_slot(self, path, args, types, src):
 		if self.current_slot_zctrl:
 			slot_i=args[0]
 			logging.debug("Automate active-slot: %s" % slot_i)
@@ -370,7 +386,7 @@ class zynthian_engine_zynaddsubfx(zynthian_engine):
 				liblo.send(self.osc_target, "/automate/learn-binding-new-slot", self.current_slot_zctrl.osc_path)
 
 
-	def cb_osc_param_change(self, path, args):
+	def XXX_cb_osc_param_change(self, path, args):
 		if path in self.slot_zctrls:
 			#logging.debug("OSC Param Change %s => %s" % (path, args[0]))
 			try:
@@ -378,7 +394,7 @@ class zynthian_engine_zynaddsubfx(zynthian_engine):
 				zctrl.set_value(args[0])
 
 				#Refresh GUI controller in screen when needed ...
-				if self.zyngui.active_screen=='control' and self.zyngui.screens['control'].mode=='control':
+				if self.zyngui.active_screen=='control' and not self.zyngui.modal_screen:
 					self.zyngui.screens['control'].set_controller_value(zctrl)
 			except:
 				pass
@@ -387,7 +403,7 @@ class zynthian_engine_zynaddsubfx(zynthian_engine):
 				liblo.send(self.osc_target, "/automate/slot%d/midi-cc" % zctrl.slot_i)
 
 
-	def cb_osc_automate_slot_midi_cc(self, path, args, types, src):
+	def XXX_cb_osc_automate_slot_midi_cc(self, path, args, types, src):
 		# Test if there is a current MIDI-learning zctrl and a valid MIDI-CC number is returned
 		if self.current_slot_zctrl and args[0]>=0:
 			try:
@@ -403,11 +419,9 @@ class zynthian_engine_zynaddsubfx(zynthian_engine):
 			except Exception as e:
 				logging.error("Can't match zctrl slot for the returned MIDI-CC! => %s" % e)
 
-
 	# ---------------------------------------------------------------------------
 	# Deprecated functions
 	# ---------------------------------------------------------------------------
-
 
 	def cb_osc_paths(self, path, args, types, src):
 		self.get_cb_osc_paths(path, args, types, src)
@@ -463,5 +477,110 @@ class zynthian_engine_zynaddsubfx(zynthian_engine):
 				path=firstchar+a+lastchar
 				self.osc_paths_data.append((path,tnode,title))
 
+	# ---------------------------------------------------------------------------
+	# API methods
+	# ---------------------------------------------------------------------------
+
+	@classmethod
+	def zynapi_get_banks(cls):
+		banks=[]
+		for b in cls.get_dirlist(cls.bank_dirs, False):
+			banks.append({
+				'text': b[2],
+				'name': b[4],
+				'fullpath': b[0],
+				'raw': b,
+				'readonly': False
+			})
+		return banks
+
+
+	@classmethod
+	def zynapi_get_presets(cls, bank):
+		presets=[]
+		for p in cls._get_preset_list(bank['raw']):
+			presets.append({
+				'text': p[4],
+				'name': os.path.splitext(p[4])[0],
+				'fullpath': p[0],
+				'raw': p,
+				'readonly': False
+			})
+		return presets
+
+
+	@classmethod
+	def zynapi_new_bank(cls, bank_name):
+		os.mkdir(zynthian_engine.my_data_dir + "/presets/zynaddsubfx/" + bank_name)
+
+
+	@classmethod
+	def zynapi_rename_bank(cls, bank_path, new_bank_name):
+		head, tail = os.path.split(bank_path)
+		new_bank_path = head + "/" + new_bank_name
+		os.rename(bank_path, new_bank_path)
+
+
+	@classmethod
+	def zynapi_remove_bank(cls, bank_path):
+		shutil.rmtree(bank_path)
+
+
+	@classmethod
+	def zynapi_rename_preset(cls, preset_path, new_preset_name):
+		head, tail = os.path.split(preset_path)
+		fname, ext = os.path.splitext(tail)
+		new_preset_path = head + "/" + new_preset_name + ext
+		os.rename(preset_path, new_preset_path)
+
+
+	@classmethod
+	def zynapi_remove_preset(cls, preset_path):
+		os.remove(preset_path)
+
+
+	@classmethod
+	def zynapi_download(cls, fullpath):
+		return fullpath
+
+
+	@classmethod
+	def zynapi_install(cls, dpath, bank_path):
+
+		if os.path.isdir(dpath):
+			# Get list of directories (banks) containing xiz files ...
+			xiz_files = check_output("find \"{}\" -type f -iname *.xiz".format(dpath), shell=True).decode("utf-8").split("\n")
+
+			# Copy xiz files to destiny, creating the bank if needed ...
+			count = 0
+			for f in xiz_files:
+				head, xiz_fname = os.path.split(f)
+				head, dbank = os.path.split(head)
+				if dbank:
+					dest_dir = zynthian_engine.my_data_dir + "/presets/zynaddsubfx/" + dbank
+					os.makedirs(dest_dir, exist_ok=True)
+					shutil.move(f, dest_dir + "/" + xiz_fname)
+					count += 1
+
+			if count==0:
+				raise Exception("No XIZ files found!")
+
+		else:
+			fname, ext = os.path.splitext(dpath)
+			if ext=='.xiz':
+				shutil.move(dpath, bank_path)
+			else:
+				raise Exception("File doesn't look like a XIZ preset!")
+
+
+
+	@classmethod
+	def zynapi_get_formats(cls):
+		return "xiz,zip,tgz,tar.gz,tar.bz2"
+
+
+	@classmethod
+	def zynapi_martifact_formats(cls):
+		return "xiz"
 
 #******************************************************************************

@@ -23,6 +23,7 @@
 #******************************************************************************
 
 import os
+import shutil
 import logging
 import subprocess
 import oyaml as yaml
@@ -55,6 +56,18 @@ class zynthian_engine_puredata(zynthian_engine):
 	]
 
 	#----------------------------------------------------------------------------
+	# Config variables
+	#----------------------------------------------------------------------------
+
+	startup_patch = zynthian_engine.data_dir + "/presets/puredata/zynthian_startup.pd"
+
+	bank_dirs = [
+		('EX', zynthian_engine.ex_data_dir + "/presets/puredata"),
+		('MY', zynthian_engine.my_data_dir + "/presets/puredata"),
+		('_', zynthian_engine.data_dir + "/presets/puredata")
+	]
+
+	#----------------------------------------------------------------------------
 	# Initialization
 	#----------------------------------------------------------------------------
 
@@ -64,24 +77,18 @@ class zynthian_engine_puredata(zynthian_engine):
 		self.type = "Special"
 		self.name = "PureData"
 		self.nickname = "PD"
-		self.jackname = "pure_data_0"
+		#self.jackname = "pure_data_0"
+		self.jackname = "pure_data"
 
-		#self.options['midi_chan']=False
+		self.options['midi_route'] = True
 
 		self.preset = ""
 		self.preset_config = None
 
-		self.bank_dirs = [
-			('EX', self.ex_data_dir + "/presets/puredata"),
-			('_', self.my_data_dir + "/presets/puredata")
-		]
-
-		startup_patch=os.environ.get('ZYNTHIAN_MY_DATA_DIR',"/zynthian/zynthian-my-data") + "/presets/puredata/zynthian_startup.pd"
-
 		if self.config_remote_display():
-			self.base_command="/usr/bin/pd -jack -rt -alsamidi -mididev 1 -open \"{}\"".format(startup_patch)
+			self.base_command="pd -jack -jackname \"{}\" -rt -alsamidi -mididev 1 -open \"{}\"".format(self.jackname, self.startup_patch)
 		else:
-			self.base_command="/usr/bin/pd -nogui -jack -rt -alsamidi -mididev 1 -open \"{}\"".format(startup_patch)
+			self.base_command="pd -nogui -jack  -jackname \"{}\" -rt -alsamidi -mididev 1 -open \"{}\"".format(self.jackname, self.startup_patch)
 
 		self.reset()
 
@@ -97,7 +104,6 @@ class zynthian_engine_puredata(zynthian_engine):
 	# Bank Managament
 	#----------------------------------------------------------------------------
 
-
 	def get_bank_list(self, layer=None):
 		return self.get_dirlist(self.bank_dirs)
 
@@ -108,7 +114,6 @@ class zynthian_engine_puredata(zynthian_engine):
 	#----------------------------------------------------------------------------
 	# Preset Managament
 	#----------------------------------------------------------------------------
-
 
 	def get_preset_list(self, bank):
 		return self.get_dirlist(bank[0])
@@ -121,8 +126,9 @@ class zynthian_engine_puredata(zynthian_engine):
 		self.stop()
 		self.start()
 		self.refresh_all()
-		sleep(0.3)
-		self.zyngui.zynautoconnect(True)
+		sleep(0.5)
+		self.zyngui.zynautoconnect_midi(True)
+		self.zyngui.zynautoconnect_audio(False)
 		layer.send_ctrl_midi_cc()
 		return True
 
@@ -160,7 +166,6 @@ class zynthian_engine_puredata(zynthian_engine):
 
 	def cmp_presets(self, preset1, preset2):
 		return True
-
 
 	#----------------------------------------------------------------------------
 	# Controllers Managament
@@ -205,6 +210,91 @@ class zynthian_engine_puredata(zynthian_engine):
 	#--------------------------------------------------------------------------
 	# Special
 	#--------------------------------------------------------------------------
+
+	# ---------------------------------------------------------------------------
+	# API methods
+	# ---------------------------------------------------------------------------
+
+	@classmethod
+	def zynapi_get_banks(cls):
+		banks=[]
+		for b in cls.get_dirlist(cls.bank_dirs, False):
+			banks.append({
+				'text': b[2],
+				'name': b[4],
+				'fullpath': b[0],
+				'raw': b,
+				'readonly': False
+			})
+		return banks
+
+
+	@classmethod
+	def zynapi_get_presets(cls, bank):
+		presets=[]
+		for p in cls.get_dirlist(bank['fullpath']):
+			presets.append({
+				'text': p[4],
+				'name': p[2],
+				'fullpath': p[0],
+				'raw': p,
+				'readonly': False
+			})
+		return presets
+
+
+	@classmethod
+	def zynapi_new_bank(cls, bank_name):
+		os.mkdir(zynthian_engine.my_data_dir + "/presets/puredata/" + bank_name)
+
+
+	@classmethod
+	def zynapi_rename_bank(cls, bank_path, new_bank_name):
+		head, tail = os.path.split(bank_path)
+		new_bank_path = head + "/" + new_bank_name
+		os.rename(bank_path, new_bank_path)
+
+
+	@classmethod
+	def zynapi_remove_bank(cls, bank_path):
+		shutil.rmtree(bank_path)
+
+
+	@classmethod
+	def zynapi_rename_preset(cls, preset_path, new_preset_name):
+		head, tail = os.path.split(preset_path)
+		new_preset_path = head + "/" + new_preset_name
+		os.rename(preset_path, new_preset_path)
+
+
+	@classmethod
+	def zynapi_remove_preset(cls, preset_path):
+		shutil.rmtree(preset_path)
+
+
+	@classmethod
+	def zynapi_download(cls, fullpath):
+		return fullpath
+
+
+	@classmethod
+	def zynapi_install(cls, dpath, bank_path):
+		if os.path.isdir(dpath):
+			shutil.move(dpath, bank_path)
+			#TODO Test if it's a PD bundle
+		else:
+			fname, ext = os.path.splitext(dpath)
+			if ext=='.pd':
+				bank_path += "/" + fname
+				os.mkdir(bank_path)
+				shutil.move(dpath, bank_path)
+			else:
+				raise Exception("File doesn't look like a PD patch!")
+
+
+	@classmethod
+	def zynapi_get_formats(cls):
+		return "pd,zip,tgz,tar.gz,tar.bz2"
 
 
 #******************************************************************************

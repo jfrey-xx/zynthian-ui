@@ -30,37 +30,64 @@ import logging
 from . import zynthian_gui_config
 from . import zynthian_gui_selector
 
-#------------------------------------------------------------------------------
-# Configure logging
-#------------------------------------------------------------------------------
-
-# Set root logging level
-logging.basicConfig(stream=sys.stderr, level=zynthian_gui_config.log_level)
-
 #-------------------------------------------------------------------------------
 # Zynthian Preset/Instrument Selection GUI Class
 #-------------------------------------------------------------------------------
 
 class zynthian_gui_preset(zynthian_gui_selector):
 
+	buttonbar_config = [
+		(1, 'BACK'),
+		(0, 'LAYER'),
+		(2, 'FAVS'),
+		(3, 'SELECT')
+	]
+
 	def __init__(self):
+		self.only_favs = False
 		super().__init__('Preset', True)
       
       
 	def fill_list(self):
-		self.zyngui.curlayer.load_preset_list()
+		if not self.zyngui.curlayer:
+			logging.error("Can't fill preset list for None layer!")
+			return
+
+		self.zyngui.curlayer.load_preset_list(self.only_favs)
+		if not self.zyngui.curlayer.preset_list and self.only_favs:
+			self.only_favs = False
+			self.set_select_path()
+			self.zyngui.curlayer.load_preset_list()
+			
 		self.list_data=self.zyngui.curlayer.preset_list
 		super().fill_list()
 
 
-	def show(self):
+	def show(self, only_favs=None):
+		if not self.zyngui.curlayer:
+			logging.error("Can't show preset list for None layer!")
+			return
+		if only_favs is not None:
+			self.only_favs = only_favs
 		self.index=self.zyngui.curlayer.get_preset_index()
 		super().show()
 
 
 	def select_action(self, i, t='S'):
-		self.zyngui.curlayer.set_preset(i)
-		self.zyngui.show_screen('control')
+		if t=='S':
+			self.zyngui.curlayer.set_preset(i)
+			self.zyngui.show_screen('control')
+		else:
+			self.zyngui.curlayer.toggle_preset_fav(self.list_data[i])
+			self.update_list()
+
+
+	def back_action(self):
+		if self.only_favs:
+			self.disable_only_favs()
+			return ''
+		else:
+			return None
 
 
 	def preselect_action(self):
@@ -71,8 +98,35 @@ class zynthian_gui_preset(zynthian_gui_selector):
 		return self.zyngui.curlayer.restore_preset()
 
 
+	def enable_only_favs(self):
+		if not self.only_favs:
+			self.only_favs = True
+			self.set_select_path()
+			self.update_list()
+
+
+	def disable_only_favs(self):
+		if self.only_favs:
+			self.only_favs = False
+			self.set_select_path()
+			self.update_list()
+
+
+	def toggle_only_favs(self):
+		if self.only_favs:
+			self.only_favs = False
+		else:
+			self.only_favs = True
+
+		self.set_select_path()
+		self.update_list()
+
+
 	def set_select_path(self):
-		if self.zyngui.curlayer:
-			self.select_path.set(self.zyngui.curlayer.get_bankpath())
+		if self.only_favs:
+			self.select_path.set(self.zyngui.curlayer.get_basepath() + " > Favorites")
+		else:
+			if self.zyngui.curlayer:
+				self.select_path.set(self.zyngui.curlayer.get_bankpath())
 
 #------------------------------------------------------------------------------

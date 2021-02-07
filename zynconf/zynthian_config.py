@@ -37,8 +37,7 @@ from collections import OrderedDict
 # Configure logging
 #-------------------------------------------------------------------------------
 
-logger=logging.getLogger(__name__)
-logger.setLevel(logging.ERROR)
+#logging.getLogger(__name__).setLevel(logging.ERROR)
 
 #-------------------------------------------------------------------------------
 # UI Definitions
@@ -47,18 +46,75 @@ logger.setLevel(logging.ERROR)
 CustomSwitchActionType = [
 	"NONE",
 	"UI_ACTION",
-	"MIDI_CC"
+	"MIDI_CC",
+	"MIDI_NOTE",
+	"MIDI_PROG_CHANGE"
 ];
 
+ZynSensorActionType = [
+	"NONE",
+	"MIDI_CC",
+	"MIDI_PITCH_BEND",
+	"MIDI_CHAN_PRESS"
+];
 
 CustomUiAction = [
 	"NONE",
 	"POWER_OFF",
 	"REBOOT",
 	"RESTART_UI",
+
 	"ALL_NOTES_OFF",
 	"ALL_SOUNDS_OFF",
-	"ALL_OFF"
+	"ALL_OFF",
+
+	"START_AUDIO_RECORD",
+	"STOP_AUDIO_RECORD",
+	"TOGGLE_AUDIO_RECORD",
+	"START_AUDIO_PLAY",
+	"STOP_AUDIO_PLAY",
+	"TOGGLE_AUDIO_PLAY",
+
+	"START_MIDI_RECORD",
+	"STOP_MIDI_RECORD",
+	"TOGGLE_MIDI_RECORD",
+	"START_MIDI_PLAY",
+	"STOP_MIDI_PLAY",
+	"TOGGLE_MIDI_PLAY",
+
+	"START_STEP_SEQ",
+	"CONTINUE_STEP_SEQ",
+	"STOP_STEP_SEQ",
+
+	"SELECT",
+	"SELECT_UP",
+	"SELECT_DOWN",
+
+	"SWITCH_LAYER_SHORT",
+	"SWITCH_LAYER_BOLD",
+	"SWITCH_LAYER_LONG",
+	"SWITCH_BACK_SHORT",
+	"SWITCH_BACK_BOLD",
+	"SWITCH_BACK_LONG",
+	"SWITCH_SNAPSHOT_SHORT",
+	"SWITCH_SNAPSHOT_BOLD",
+	"SWITCH_SNAPSHOT_LONG",
+	"SWITCH_SELECT_SHORT",
+	"SWITCH_SELECT_BOLD",
+	"SWITCH_SELECT_LONG",
+	
+	"SCREEN_ADMIN",
+	"SCREEN_LAYER",
+	"SCREEN_BANK",
+	"SCREEN_PRESET",
+	"SCREEN_CONTROL",
+
+	"MODAL_SNAPSHOT_LOAD",
+	"MODAL_SNAPSHOT_SAVE",
+	"MODAL_AUDIO_RECORDER",
+	"MODAL_MIDI_RECORDER",
+	"MODAL_ALSA_MIXER",
+	"MODAL_STEPSEQ"
 ];
 
 #-------------------------------------------------------------------------------
@@ -110,7 +166,7 @@ def load_config(set_env=True, fpath=None):
 			#logging.debug("CONFIG VARNAME: %s" % res.group(1))
 
 	# Execute config script and dump environment
-	env=check_output("source %s;env" % fpath, shell=True, universal_newlines=True, executable="/bin/bash")
+	env=check_output("source \"{}\";env".format(fpath), shell=True, universal_newlines=True, executable="/bin/bash")
 
 	# Parse environment dump
 	config={}
@@ -427,6 +483,20 @@ def is_service_active(service):
 	else:
 		return False
 
+#------------------------------------------------------------------------------
+# Jackd configuration
+#------------------------------------------------------------------------------
+
+def get_jackd_options():
+	jackd_options = {}
+	for item in os.environ.get('JACKD_OPTIONS',"").strip().split('-'):
+		try:
+			parts = item.split(' ', 1)
+			jackd_options[parts[0]] = parts[1].strip()
+		except:
+			pass
+
+	return jackd_options
 
 #------------------------------------------------------------------------------
 

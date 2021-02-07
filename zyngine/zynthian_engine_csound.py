@@ -23,6 +23,7 @@
 #******************************************************************************
 
 import os
+import shutil
 import logging
 import subprocess
 import oyaml as yaml
@@ -55,6 +56,16 @@ class zynthian_engine_csound(zynthian_engine):
 	]
 
 	#----------------------------------------------------------------------------
+	# Config variables
+	#----------------------------------------------------------------------------
+
+	bank_dirs = [
+		('EX', zynthian_engine.ex_data_dir + "/presets/csound"),
+		('MY', zynthian_engine.my_data_dir + "/presets/csound"),
+		('_', zynthian_engine.data_dir + "/presets/csound")
+	]
+
+	#----------------------------------------------------------------------------
 	# Initialization
 	#----------------------------------------------------------------------------
 
@@ -71,18 +82,12 @@ class zynthian_engine_csound(zynthian_engine):
 		self.preset = ""
 		self.preset_config = None
 
-		self.bank_dirs = [
-			('EX', self.ex_data_dir + "/presets/csound")
-			('_', self.my_data_dir + "/presets/csound")
-		]
-
-
 		if self.config_remote_display():
 			self.nogui = False
-			self.base_command="/usr/bin/csound -+rtaudio=jack -+rtmidi=alsaseq -M14 -o dac"
+			self.base_command="csound -+rtaudio=jack -+rtmidi=alsaseq -M14 -o dac"
 		else:
 			self.nogui = True
-			self.base_command="/usr/bin/csound --nodisplays -+rtaudio=jack -+rtmidi=alsaseq -M14 -o dac"
+			self.base_command="csound --nodisplays -+rtaudio=jack -+rtmidi=alsaseq -M14 -o dac"
 
 		self.reset()
 
@@ -98,7 +103,6 @@ class zynthian_engine_csound(zynthian_engine):
 	# Bank Managament
 	#----------------------------------------------------------------------------
 
-
 	def get_bank_list(self, layer=None):
 		return self.get_dirlist(self.bank_dirs)
 
@@ -110,20 +114,19 @@ class zynthian_engine_csound(zynthian_engine):
 	# Preset Managament
 	#----------------------------------------------------------------------------
 
-
 	def get_preset_list(self, bank):
 		return self.get_dirlist(bank[0])
 
 
 	def set_preset(self, layer, preset, preload=False):
 		self.load_preset_config(preset[0])
-		self.command=self.base_command+ " " + self.get_fixed_preset_filepath(preset[0])
+		self.command=self.base_command+ " " + self.get_fixed_preset_filepath(preset[0], layer.midi_chan)
 		self.preset=preset[0]
 		self.stop()
 		self.start()
 		self.refresh_all()
 		sleep(0.3)
-		self.zyngui.zynautoconnect(True)
+		self.zyngui.zynautoconnect()
 		layer.send_ctrl_midi_cc()
 		return True
 
@@ -160,28 +163,32 @@ class zynthian_engine_csound(zynthian_engine):
 		return preset_fpath
 
 
-	def get_fixed_preset_filepath(self, preset_dir):
+	def get_fixed_preset_filepath(self, preset_dir, midi_chan):
 		
 		preset_fpath=self.get_preset_filepath(preset_dir)
-		
-		if self.nogui:
-			# Generate on-the-fly CSD file, disabling GUI
-			with open(preset_fpath, 'r') as f:
-				data=f.read()
+
+		# Generate on-the-fly CSD file
+		with open(preset_fpath, 'r') as f:
+			data=f.read()
+
+			# Set MIDI channel
+			data = data.replace('imidichan = 1', "imidichan = {}".format(midi_chan + 1))
+
+			# Disable GUI
+			if self.nogui:
 				data = data.replace('FLrun', ";FLrun")
-				fixed_preset_fpath = preset_fpath.replace(".csd", ".nogui.csd")
 
-				with open(fixed_preset_fpath, 'w') as ff:
-					ff.write(data)
+			fixed_preset_fpath = preset_fpath.replace(".csd", ".zynthian.csd")
+			with open(fixed_preset_fpath, 'w') as ff:
+				ff.write(data)
 
-				return fixed_preset_fpath
+			return fixed_preset_fpath
 
 		return preset_fpath
 
 
 	def cmp_presets(self, preset1, preset2):
 		return True
-
 
 	#----------------------------------------------------------------------------
 	# Controllers Managament
@@ -226,6 +233,91 @@ class zynthian_engine_csound(zynthian_engine):
 	#--------------------------------------------------------------------------
 	# Special
 	#--------------------------------------------------------------------------
+
+	# ---------------------------------------------------------------------------
+	# API methods
+	# ---------------------------------------------------------------------------
+
+	@classmethod
+	def zynapi_get_banks(cls):
+		banks=[]
+		for b in cls.get_dirlist(cls.bank_dirs, False):
+			banks.append({
+				'text': b[2],
+				'name': b[4],
+				'fullpath': b[0],
+				'raw': b,
+				'readonly': False
+			})
+		return banks
+
+
+	@classmethod
+	def zynapi_get_presets(cls, bank):
+		presets=[]
+		for p in cls.get_dirlist(bank['fullpath']):
+			presets.append({
+				'text': p[4],
+				'name': p[2],
+				'fullpath': p[0],
+				'raw': p,
+				'readonly': False
+			})
+		return presets
+
+
+	@classmethod
+	def zynapi_new_bank(cls, bank_name):
+		os.mkdir(zynthian_engine.my_data_dir + "/presets/csound/" + bank_name)
+
+
+	@classmethod
+	def zynapi_rename_bank(cls, bank_path, new_bank_name):
+		head, tail = os.path.split(bank_path)
+		new_bank_path = head + "/" + new_bank_name
+		os.rename(bank_path, new_bank_path)
+
+
+	@classmethod
+	def zynapi_remove_bank(cls, bank_path):
+		shutil.rmtree(bank_path)
+
+
+	@classmethod
+	def zynapi_rename_preset(cls, preset_path, new_preset_name):
+		head, tail = os.path.split(preset_path)
+		new_preset_path = head + "/" + new_preset_name
+		os.rename(preset_path, new_preset_path)
+
+
+	@classmethod
+	def zynapi_remove_preset(cls, preset_path):
+		shutil.rmtree(preset_path)
+
+
+	@classmethod
+	def zynapi_download(cls, fullpath):
+		return fullpath
+
+
+	@classmethod
+	def zynapi_install(cls, dpath, bank_path):
+		if os.path.isdir(dpath):
+			shutil.move(dpath, bank_path)
+			#TODO Test if it's a CSound bundle
+		else:
+			fname, ext = os.path.splitext(dpath)
+			if ext=='.csd':
+				bank_path += "/" + fname
+				os.mkdir(bank_path)
+				shutil.move(dpath, bank_path)
+			else:
+				raise Exception("File doesn't look like a CSound patch!")
+
+
+	@classmethod
+	def zynapi_get_formats(cls):
+		return "csd,zip,tgz,tar.gz,tar.bz2"
 
 
 #******************************************************************************

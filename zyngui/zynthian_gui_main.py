@@ -50,6 +50,7 @@ class zynthian_gui_main(zynthian_gui_selector):
 		self.list_data.append((None,0,"-----------------------------"))
 
 		# Add list of Apps
+		self.list_data.append((self.audio_mixer,0,"Audio Mixer"))
 		self.list_data.append((self.audio_recorder,0,"Audio Recorder"))
 		self.list_data.append((self.midi_recorder,0,"MIDI Recorder"))
 		self.list_data.append((self.alsa_mixer,0,"ALSA Mixer"))
@@ -103,9 +104,15 @@ class zynthian_gui_main(zynthian_gui_selector):
 		logging.info("Auto EQ")
 		self.zyngui.show_modal('autoeq')
 
+
 	def step_sequencer(self):
 		logging.info("Step Sequencer")
 		self.zyngui.show_modal('stepseq')
+
+
+	def audio_mixer(self):
+		logging.info("Audio Mixer")
+		self.zyngui.show_modal('audio_mixer')
 
 
 	def admin(self):

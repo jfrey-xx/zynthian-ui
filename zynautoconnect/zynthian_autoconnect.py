@@ -558,11 +558,12 @@ def audio_autoconnect(force=False):
 					pass
 
 		#Setup dpmeter connections if enabled ...
-		if not zynthian_gui_config.show_cpu_status:
-			#Prepare for setup dpmeter connections
-			dpmeter_out = jclient.get_ports("jackpeak", is_input=True, is_audio=True)
-			dpmeter_conports_1=jclient.get_all_connections("jackpeak:input_a")
-			dpmeter_conports_2=jclient.get_all_connections("jackpeak:input_b")
+        # HOTFIX: not working with zynmixer?
+		#if not zynthian_gui_config.show_cpu_status:
+		#	#Prepare for setup dpmeter connections
+		#	dpmeter_out = jclient.get_ports("jackpeak", is_input=True, is_audio=True)
+		#	dpmeter_conports_1=jclient.get_all_connections("jackpeak:input_a")
+		#	dpmeter_conports_2=jclient.get_all_connections("jackpeak:input_b")
 	# Connect mixer to main output
 	try:
 		jclient.connect("zynmixer:output_a", "system:playback_1")
